@@ -30,6 +30,9 @@ import com.google.android.gms.maps.model.LatLng
 import com.google.maps.android.compose.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -108,23 +111,27 @@ private fun MytrackScreen() {
                         .addHeader("Authorization", "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
                         .addHeader("Prefer", "resolution=merge-duplicates")
                         .post(body).build()
-                    client.newCall(req).execute().use { response ->
-                        status = if (response.isSuccessful) "Berbagi lokasi aktif" else "Gagal mengirim lokasi (${response.code})"
+                    val uploadResult = withContext(Dispatchers.IO) {
+                        client.newCall(req).execute().use { response -> response.isSuccessful to response.code }
                     }
+                    status = if (uploadResult.first) "Berbagi lokasi aktif" else "Gagal mengirim lokasi (${uploadResult.second})"
                     val get = Request.Builder()
                         .url("${BuildConfig.SUPABASE_URL}/rest/v1/shared_locations?select=user_id,latitude,longitude,updated_at&pair_code=eq.${java.net.URLEncoder.encode(pairCode.trim().uppercase(), "UTF-8")}&user_id=neq.$deviceId&order=updated_at.desc&limit=1")
                         .addHeader("apikey", BuildConfig.SUPABASE_ANON_KEY)
                         .addHeader("Authorization", "Bearer ${BuildConfig.SUPABASE_ANON_KEY}").get().build()
-                    client.newCall(get).execute().use { response ->
-                        if (response.isSuccessful) {
-                            val arr = JSONArray(response.body?.string() ?: "[]")
-                            if (arr.length() > 0) {
-                                val item = arr.getJSONObject(0)
-                                partnerLocation = LatLng(item.getDouble("latitude"), item.getDouble("longitude"))
-                                lastPartnerUpdate = "Lokasi pasangan diperbarui"
-                            } else lastPartnerUpdate = "Menunggu pasangan membagikan lokasi"
+                    val remotePoint = withContext(Dispatchers.IO) {
+                        client.newCall(get).execute().use { response ->
+                            if (!response.isSuccessful) null else {
+                                val arr = JSONArray(response.body?.string() ?: "[]")
+                                if (arr.length() == 0) null else {
+                                    val item = arr.getJSONObject(0)
+                                    LatLng(item.getDouble("latitude"), item.getDouble("longitude"))
+                                }
+                            }
                         }
                     }
+                    partnerLocation = remotePoint
+                    lastPartnerUpdate = if (remotePoint == null) "Menunggu pasangan membagikan lokasi" else "Lokasi pasangan diperbarui"
                 } catch (e: Exception) { status = "Koneksi gagal: ${e.localizedMessage ?: "periksa internet"}" }
             } else if (point != null) status = "Isi konfigurasi Supabase untuk mengaktifkan sinkronisasi"
             delay(5000)
