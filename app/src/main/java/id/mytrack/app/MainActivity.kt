@@ -8,6 +8,8 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -96,6 +98,9 @@ private fun MytrackScreen() {
     }
 
     LaunchedEffect(permissionGranted) { if (permissionGranted) requestLocation() }
+    LaunchedEffect(Unit) {
+        if (!permissionGranted) permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+    }
 
     LaunchedEffect(sharing, pairCode, myLocation) {
         while (sharing && pairCode.length >= 6) {
@@ -177,7 +182,7 @@ private fun MytrackScreen() {
                 colors = CardDefaults.cardColors(containerColor = Color.White),
                 elevation = CardDefaults.cardElevation(8.dp)
             ) {
-                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Column(Modifier.padding(18.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Berbagi lokasi", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Navy)
                     OutlinedTextField(
                         value = codeInput, onValueChange = { codeInput = it.uppercase().take(12) },
@@ -205,6 +210,13 @@ private fun MytrackScreen() {
                         ) {
                             Icon(if (sharing) Icons.Default.Pause else Icons.Default.ShareLocation, contentDescription = null)
                             Spacer(Modifier.width(6.dp)); Text(if (sharing) "Hentikan" else "Mulai berbagi")
+                        }
+                    }
+                    if (!permissionGranted) {
+                        Button(modifier = Modifier.fillMaxWidth(), onClick = { permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) }) {
+                            Icon(Icons.Default.MyLocation, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text("Aktifkan izin lokasi")
                         }
                     }
                     Text(status, style = MaterialTheme.typography.bodySmall, color = Blue)
