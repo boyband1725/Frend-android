@@ -30,3 +30,22 @@ MYtrack is an Android live-location sharing MVP. Both people must agree to share
 - The SQL policies currently allow anonymous clients to read and write location rows across the test table. Use only a disposable test Supabase project and dummy test data; do not use real locations until authenticated pair-membership RLS or a secured Edge Function has replaced these policies.
 - No hidden tracking, stealth mode, or access to another person's location without consent.
 - A Google Maps API key and a separate Supabase project are required for the live map and location sync.
+
+
+## Radar AIS kapal (tahap server)
+- Edge Function: `supabase/functions/ais-radar/index.ts`.
+- `supabase/config.toml` requires a valid Supabase Auth JWT (`verify_jwt = true`); the AIS provider key is never shipped in the Android APK.
+- The function accepts `lat`, `lon`, and optional `radius` (5–50 km), then opens a short AISStream WebSocket collection window and returns recent position reports.
+- **Not live yet:** this repository's Android app does not yet sign users in or call the radar function. Do not disable JWT verification to make it appear to work.
+
+### Configure and deploy the protected AIS function
+1. In Supabase Dashboard, open the MYtrack project and copy its Project Reference.
+2. Create a Supabase Personal Access Token in your Supabase account.
+3. In GitHub repository Settings → Secrets and variables → Actions, add:
+   - `SUPABASE_ACCESS_TOKEN` = your Supabase personal access token
+   - `SUPABASE_PROJECT_REF` = the MYtrack project reference
+   - `AISSTREAM_API_KEY` = the AISStream key (already added as a GitHub secret)
+4. Run GitHub Actions workflow **Deploy MYtrack AIS Radar** manually.
+5. After deployment, the Android app still needs Supabase Auth login/session integration before it can call this JWT-protected function.
+
+Never put provider keys or Supabase service-role keys in Android source, APK assets, or public repository files. Use test data until authenticated pair-membership RLS is implemented for location sharing.
