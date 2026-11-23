@@ -219,4 +219,3 @@ private fun MytrackScreen() {
     }
 }
 
-private fun String.toMediaType() = okhttp3.MediaType.Companion.toMediaType(this)
