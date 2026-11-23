@@ -1,0 +1,4 @@
+project_id = "mytrack"
+
+[functions.ais-radar]
+verify_jwt = true
