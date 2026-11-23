@@ -10,8 +10,9 @@ create table if not exists public.shared_locations (
 
 alter table public.shared_locations enable row level security;
 
--- MVP access: the pair code acts as a shared secret. Do not use personal or guessable codes.
--- Before public launch, replace these policies with authenticated-user membership policies.
+-- DEVELOPMENT ONLY: these permissive anon policies allow public clients to read/write rows.
+-- Use only a disposable test Supabase project and dummy locations. Replace with authenticated
+-- pair-membership RLS or a secured Edge Function before entering real location data.
 create policy "pair members can read locations"
 on public.shared_locations for select
 to anon, authenticated
