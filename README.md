@@ -27,6 +27,6 @@ MYtrack is an Android live-location sharing MVP. Both people must agree to share
 
 ## MVP limitations and safety
 - Sharing runs only while the app is open; background tracking and foreground-service notification are not included yet.
-- The current SQL policies are development-only. The pair code is a bearer secret; anyone who knows it could read or write that pair's rows. Use a long random code and replace these policies with authenticated membership and stricter RLS before public release.
+- The SQL policies currently allow anonymous clients to read and write location rows across the test table. Use only a disposable test Supabase project and dummy test data; do not use real locations until authenticated pair-membership RLS or a secured Edge Function has replaced these policies.
 - No hidden tracking, stealth mode, or access to another person's location without consent.
 - A Google Maps API key and a separate Supabase project are required for the live map and location sync.
