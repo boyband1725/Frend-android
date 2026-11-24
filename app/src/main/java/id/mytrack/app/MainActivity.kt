@@ -2,6 +2,12 @@ package id.mytrack.app
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.Path
+import android.graphics.RectF
+import android.graphics.drawable.BitmapDrawable
 import android.location.Geocoder
 import android.os.Bundle
 import org.osmdroid.config.Configuration
@@ -60,8 +66,54 @@ private data class AisShip(
     val latitude: Double,
     val longitude: Double,
     val speedKnots: Double,
-    val course: Double
+    val course: Double,
+    val shipType: Int,
+    val imo: Long
 )
+
+private fun shipTypeLabel(type: Int): String = when (type) {
+    in 60..69 -> "Kapal penumpang"
+    in 70..79 -> "Kapal kargo"
+    in 80..89 -> "Kapal tanker"
+    in 30..39 -> "Kapal khusus"
+    else -> "Kapal AIS"
+}
+
+private fun shipMarkerIcon(context: android.content.Context, shipType: Int): BitmapDrawable {
+    val bitmap = Bitmap.createBitmap(112, 112, Bitmap.Config.ARGB_8888)
+    val canvas = Canvas(bitmap)
+    val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    val bodyColor = when (shipType) {
+        in 60..69 -> android.graphics.Color.rgb(238, 177, 45)
+        in 70..79 -> android.graphics.Color.rgb(42, 111, 205)
+        in 80..89 -> android.graphics.Color.rgb(231, 126, 42)
+        else -> android.graphics.Color.rgb(92, 111, 128)
+    }
+    paint.color = android.graphics.Color.WHITE
+    canvas.drawCircle(56f, 56f, 49f, paint)
+    paint.color = android.graphics.Color.rgb(45, 54, 66)
+    paint.style = Paint.Style.STROKE
+    paint.strokeWidth = 4f
+    canvas.drawCircle(56f, 56f, 47f, paint)
+    paint.style = Paint.Style.FILL
+    paint.color = bodyColor
+    val hull = Path().apply {
+        moveTo(56f, 9f)
+        lineTo(78f, 39f)
+        lineTo(73f, 82f)
+        quadraticTo(56f, 101f, 39f, 82f)
+        lineTo(34f, 39f)
+        close()
+    }
+    canvas.drawPath(hull, paint)
+    paint.color = android.graphics.Color.WHITE
+    canvas.drawRoundRect(RectF(45f, 39f, 67f, 63f), 5f, 5f, paint)
+    paint.color = bodyColor
+    canvas.drawRect(RectF(50f, 44f, 62f, 49f), paint)
+    paint.color = android.graphics.Color.WHITE
+    canvas.drawRect(RectF(51f, 53f, 61f, 58f), paint)
+    return BitmapDrawable(context.resources, bitmap)
+}
 
 private fun distanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
     val earthRadiusKm = 6371.0
@@ -262,17 +314,27 @@ private fun MytrackScreen() {
                             latitude = lat,
                             longitude = lon,
                             speedKnots = item.optDouble("speedKnots", 0.0),
-                            course = item.optDouble("course", 0.0)
+                            course = item.optDouble("course", 0.0),
+                            shipType = item.optInt("shipType", 0),
+                            imo = item.optLong("imo", 0L)
                         )
                     }.distinctBy { it.mmsi }
                         .sortedBy { ship -> distanceKm(point.latitude, point.longitude, ship.latitude, ship.longitude) }
                     val streamError = radarResult.optString("streamError", "")
                     val message = radarResult.optString("message", "")
+                    val confirmed = radarResult.optBoolean("subscriptionConfirmed", false)
+                    val compressed = radarResult.optBoolean("compressionEnabled", false)
+                    val counts = radarResult.optJSONObject("messageCounts")
+                    val positionPackets = (counts?.optInt("PositionReport", 0) ?: 0) +
+                        (counts?.optInt("StandardClassBPositionReport", 0) ?: 0) +
+                        (counts?.optInt("ExtendedClassBPositionReport", 0) ?: 0)
                     radarStatus = when {
                         aisShips.isNotEmpty() -> "${aisShips.size} kapal AIS terdeteksi • radius 20 km"
                         streamError.isNotBlank() && streamError != "null" -> "Sumber AIS bermasalah: $streamError"
-                        message.isNotBlank() && message != "null" -> message
-                        else -> "Belum ada siaran AIS dalam radius 20 km"
+                        !confirmed -> message.ifBlank { "AISStream belum mengonfirmasi koneksi" }
+                        !compressed -> "Koneksi AIS aktif, tetapi kompresi data belum aktif"
+                        positionPackets == 0 -> "AIS tersambung dan terkompresi; belum ada laporan posisi kapal dalam sampel 45 detik"
+                        else -> message.ifBlank { "Paket posisi diterima, menunggu koordinat kapal" }
                     }
                 } catch (e: Exception) {
                     radarStatus = "Radar gagal: ${e.localizedMessage ?: "periksa koneksi dan konfigurasi"}"
@@ -362,8 +424,21 @@ private fun MytrackScreen() {
                 searchedPlace?.let { addPin(it, searchQuery.ifBlank { "Tempat dicari" }, "Hasil pencarian") }
                 partnerLocation?.let { addPin(it, "Pasangan", lastPartnerUpdate) }
                 aisShips.forEach { ship ->
-                    addPin(LatLng(ship.latitude, ship.longitude), ship.name.ifBlank { "Kapal ${ship.mmsi}" },
-                        "MMSI ${ship.mmsi} • ${ship.speedKnots} kn • arah ${ship.course}°")
+                    val marker = OsmMarker(map).apply {
+                        position = GeoPoint(ship.latitude, ship.longitude)
+                        title = ship.name.ifBlank { "Kapal ${ship.mmsi}" }
+                        snippet = buildString {
+                            append("${shipTypeLabel(ship.shipType)} • ")
+                            append("MMSI ${ship.mmsi}")
+                            if (ship.imo > 0) append(" • IMO ${ship.imo}")
+                            append(" • ${String.format(Locale.US, "%.1f kn", ship.speedKnots)}")
+                            append(" • arah ${ship.course.toInt()}°")
+                        }
+                        icon = shipMarkerIcon(context, ship.shipType)
+                        setAnchor(OsmMarker.ANCHOR_CENTER, OsmMarker.ANCHOR_CENTER)
+                        rotation = (ship.course % 360.0).toFloat()
+                    }
+                    map.overlays.add(marker)
                 }
                 if (routePoints.isNotEmpty()) {
                     val start = routePoints.first()
@@ -552,8 +627,8 @@ private fun MytrackScreen() {
                         else aisShips.forEach { ship ->
                             ListItem(
                                 headlineContent = { Text(ship.name.ifBlank { "Nama kapal belum tersedia" }) },
-                                supportingContent = { Text("MMSI ${ship.mmsi} • ${String.format(Locale.US, "%.1f kn", ship.speedKnots)} • arah ${ship.course.toInt()}°") },
-                                leadingContent = { Icon(Icons.Default.DirectionsBoat, contentDescription = null, tint = Blue) }
+                                supportingContent = { Text("${shipTypeLabel(ship.shipType)} • MMSI ${ship.mmsi} • ${String.format(Locale.US, "%.1f kn", ship.speedKnots)} • arah ${ship.course.toInt()}°") },
+                                leadingContent = { Icon(Icons.Default.DirectionsBoat, contentDescription = null, tint = when (ship.shipType) { in 80..89 -> Color(0xFFE77E2A); in 60..69 -> Color(0xFFEEB12D); else -> Blue }) }
                             )
                         }
                         Text("Cakupan bergantung pada penerima AIS di sekitar dan layanan AIS yang tersedia.", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
