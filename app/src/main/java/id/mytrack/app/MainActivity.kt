@@ -2,6 +2,7 @@ package id.mytrack.app
 
 import android.Manifest
 import android.content.pm.PackageManager
+import android.location.Geocoder
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -42,6 +43,7 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import java.util.Locale
 
 private val Navy = Color(0xFF123B70)
 private val Blue = Color(0xFF2878E5)
@@ -82,6 +84,10 @@ private fun MytrackScreen() {
     val prefs = remember { context.getSharedPreferences("mytrack", 0) }
     val deviceId = remember { prefs.getString("device_id", null) ?: UUID.randomUUID().toString().also { prefs.edit().putString("device_id", it).apply() } }
     var myLocation by remember { mutableStateOf<LatLng?>(null) }
+    var myPlaceName by remember { mutableStateOf("Mencari nama lokasi…") }
+    var searchQuery by remember { mutableStateOf("") }
+    var searchStatus by remember { mutableStateOf("") }
+    var searchedPlace by remember { mutableStateOf<LatLng?>(null) }
     var partnerLocation by remember { mutableStateOf<LatLng?>(null) }
     var pairCode by remember { mutableStateOf(prefs.getString("pair_code", "") ?: "") }
     var codeInput by remember { mutableStateOf(pairCode) }
@@ -107,7 +113,16 @@ private fun MytrackScreen() {
                     if (loc != null) {
                         val point = LatLng(loc.latitude, loc.longitude)
                         myLocation = point
-                        scope.launch { camera.animate(CameraUpdateFactory.newLatLngZoom(point, 16f)) }
+                        scope.launch {
+                            camera.animate(CameraUpdateFactory.newLatLngZoom(point, 16f))
+                            myPlaceName = try {
+                                withContext(Dispatchers.IO) {
+                                    @Suppress("DEPRECATION")
+                                    Geocoder(context, Locale("id", "ID")).getFromLocation(loc.latitude, loc.longitude, 1)
+                                        ?.firstOrNull()?.getAddressLine(0) ?: "Nama tempat belum tersedia"
+                                }
+                            } catch (_: Exception) { "Nama tempat belum tersedia" }
+                        }
                     } else status = "GPS belum mendapatkan lokasi. Coba di luar ruangan."
                 }
                 .addOnFailureListener { status = "Gagal mengambil lokasi: ${it.localizedMessage}" }
@@ -229,7 +244,8 @@ private fun MytrackScreen() {
                     properties = MapProperties(isMyLocationEnabled = permissionGranted),
                     uiSettings = MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = false)
                 ) {
-                    myLocation?.let { Marker(state = MarkerState(position = it), title = "Lokasi saya", snippet = "Perangkat ini") }
+                    myLocation?.let { Marker(state = MarkerState(position = it), title = "Lokasi saya", snippet = myPlaceName) }
+                    searchedPlace?.let { Marker(state = MarkerState(position = it), title = searchQuery, snippet = "Hasil pencarian") }
                     partnerLocation?.let { Marker(state = MarkerState(position = it), title = "Pasangan", snippet = lastPartnerUpdate) }
                     aisShips.forEach { ship ->
                         Marker(
@@ -259,7 +275,13 @@ private fun MytrackScreen() {
                 elevation = CardDefaults.cardElevation(8.dp)
             ) {
                 Column(Modifier.padding(18.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Berbagi lokasi", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Navy)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Berbagi lokasi", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Navy)
+                            Text("Peta, lokasi pasangan, dan radar kapal", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        }
+                        Icon(Icons.Default.Explore, contentDescription = null, tint = Blue)
+                    }
                     Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
                         Column(Modifier.weight(1f)) {
                             Text("Radar kapal AIS", fontWeight = FontWeight.SemiBold, color = Navy)
