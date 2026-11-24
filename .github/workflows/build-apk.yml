@@ -16,7 +16,7 @@ jobs:
       MYTRACK_VERSION_NAME: 1.0.${{ github.run_number }}
       MYTRACK_KEYSTORE_PASSWORD: ${{ secrets.MYTRACK_KEYSTORE_PASSWORD }}
       MYTRACK_KEY_ALIAS: ${{ secrets.MYTRACK_KEY_ALIAS }}
-      MYTRACK_KEY_PASSWORD: ${{ secrets.MYTRACK_KEY_PASSWORD }}
+      MYTRACK_KEY_PASSWORD: ${{ secrets.MYTRACK_KEYSTORE_PASSWORD }}
       MAPS_API_KEY: ${{ secrets.MAPS_API_KEY }}
     steps:
       - name: Checkout
