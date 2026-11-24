@@ -39,7 +39,12 @@ Deno.serve(async (req) => {
 
   const ships = new Map<number, Ship>();
   const names = new Map<number, string>();
+  const messageCounts: Record<string, number> = {};
   let socket: WebSocket | null = null;
+  let subscriptionConfirmed = false;
+  let compressionEnabled: boolean | null = null;
+  let closeCode: number | null = null;
+  let closeReason = "";
 
   try {
     const result = await new Promise<{ ships: Ship[]; streamError?: string }>((resolve) => {
@@ -52,7 +57,8 @@ Deno.serve(async (req) => {
         resolve({ ships: [...ships.values()], ...(streamError ? { streamError } : {}) });
       };
 
-      const timer = setTimeout(() => finish(), 20000);
+      // A 20-second sample was too short for an event-driven feed at some ports.
+      const timer = setTimeout(() => finish(), 30000);
       try {
         socket = new WebSocket("wss://stream.aisstream.io/v0/stream");
         socket.binaryType = "arraybuffer";
@@ -60,7 +66,13 @@ Deno.serve(async (req) => {
           socket?.send(JSON.stringify({
             APIKey: apiKey,
             BoundingBoxes: bounds,
-            FilterMessageTypes: ["PositionReport", "ShipStaticData"],
+            FilterMessageTypes: [
+              "PositionReport",
+              "StandardClassBPositionReport",
+              "ExtendedClassBPositionReport",
+              "ShipStaticData",
+              "StaticDataReport",
+            ],
           }));
         };
         socket.onmessage = async (event) => {
@@ -71,13 +83,29 @@ Deno.serve(async (req) => {
             else if (event.data instanceof Blob) raw = await event.data.text();
             else return;
             const packet = JSON.parse(raw);
+            const messageType = String(packet.MessageType || "Unknown");
+            messageCounts[messageType] = (messageCounts[messageType] || 0) + 1;
+
+            if (messageType === "SubscriptionConfirmation") {
+              subscriptionConfirmed = true;
+              compressionEnabled = packet.Message?.CompressionEnabled === true;
+              return;
+            }
+
             const meta = packet.MetaData || {};
-            const mmsi = Number(meta.MMSI ?? packet.Message?.PositionReport?.UserID ?? packet.Message?.ShipStaticData?.UserID);
+            const message = packet.Message || {};
+            const payload =
+              message.PositionReport ||
+              message.StandardClassBPositionReport ||
+              message.ExtendedClassBPositionReport ||
+              message.StaticDataReport ||
+              message.ShipStaticData ||
+              {};
+            const mmsi = Number(meta.MMSI ?? payload.UserID);
             if (!Number.isFinite(mmsi)) return;
 
-            if (packet.MessageType === "ShipStaticData") {
-              const staticData = packet.Message?.ShipStaticData || {};
-              const name = String(staticData.Name || meta.ShipName || "").replace(/@/g, "").trim();
+            if (messageType === "ShipStaticData" || messageType === "StaticDataReport") {
+              const name = String(payload.Name || meta.ShipName || "").replace(/@/g, "").trim();
               if (name) {
                 names.set(mmsi, name);
                 const existing = ships.get(mmsi);
@@ -86,38 +114,58 @@ Deno.serve(async (req) => {
               return;
             }
 
-            if (packet.MessageType !== "PositionReport") return;
-            const pos = packet.Message?.PositionReport || {};
-            const shipLat = Number(meta.Latitude ?? pos.Latitude);
-            const shipLon = Number(meta.Longitude ?? pos.Longitude);
-            if (!Number.isFinite(shipLat) || !Number.isFinite(shipLon)) return;
+            if (!["PositionReport", "StandardClassBPositionReport", "ExtendedClassBPositionReport"].includes(messageType)) return;
+            const shipLat = Number(meta.Latitude ?? payload.Latitude);
+            const shipLon = Number(meta.Longitude ?? payload.Longitude);
+            if (!Number.isFinite(shipLat) || !Number.isFinite(shipLon) ||
+                Math.abs(shipLat) > 90 || Math.abs(shipLon) > 180) return;
             const previous = ships.get(mmsi);
             ships.set(mmsi, {
               mmsi,
               name: names.get(mmsi) || String(meta.ShipName || previous?.name || "Nama kapal belum diterima").replace(/@/g, "").trim(),
               latitude: shipLat,
               longitude: shipLon,
-              speedKnots: Number(pos.Sog ?? 0),
-              course: Number(pos.Cog ?? pos.TrueHeading ?? 0),
-              heading: Number(pos.TrueHeading ?? 0),
+              speedKnots: Number(payload.Sog ?? 0),
+              course: Number(payload.Cog ?? payload.TrueHeading ?? 0),
+              heading: Number(payload.TrueHeading ?? 0),
               receivedAt: new Date().toISOString(),
             });
           } catch (_) { /* Ignore malformed AIS messages. */ }
         };
-        socket.onerror = () => finish("Koneksi AISStream gagal");
-        socket.onclose = () => finish();
+        socket.onerror = () => finish("Koneksi AISStream gagal atau ditolak");
+        socket.onclose = (event) => {
+          closeCode = event.code;
+          closeReason = event.reason || "";
+          finish();
+        };
       } catch (_) {
         finish("Tidak dapat membuka koneksi AISStream");
       }
     });
+
+    const shipList = result.ships;
+    const message = shipList.length
+      ? null
+      : !subscriptionConfirmed
+        ? "AISStream belum mengonfirmasi langganan. Periksa API key AISSTREAM_API_KEY dan status koneksi."
+        : compressionEnabled === false
+          ? "Langganan diterima tetapi kompresi permessage-deflate tidak aktif; koneksi mungkin tidak menerima aliran data penuh."
+          : "Langganan AISStream diterima, tetapi tidak ada laporan posisi kapal dalam 30 detik. Ini menunjukkan keterbatasan cakupan/penerimaan data AIS di area ini, bukan masalah tampilan peta.";
+
     return json({
-      ships: result.ships,
-      count: result.ships.length,
+      ships: shipList,
+      count: shipList.length,
       radiusKm,
-      listeningSeconds: 20,
+      listeningSeconds: 30,
+      subscriptionConfirmed,
+      compressionEnabled,
+      messageCounts,
+      closeCode,
+      closeReason,
       streamError: result.streamError || null,
-      message: result.ships.length ? null : "Tidak ada siaran AIS yang diterima dalam jendela pemantauan ini. Coba perluas radius atau periksa cakupan AISStream.",
+      message,
     });
+
   } catch (_) {
     return json({ error: "Gagal mengambil data AIS" }, 502);
   }
