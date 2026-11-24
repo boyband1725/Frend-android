@@ -4,6 +4,17 @@ const corsHeaders = {
   "Access-Control-Allow-Methods": "GET, OPTIONS",
 };
 
+type Ship = {
+  mmsi: number;
+  name: string;
+  latitude: number;
+  longitude: number;
+  speedKnots: number;
+  course: number;
+  heading: number;
+  receivedAt: string;
+};
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "GET") return json({ error: "Method not allowed" }, 405);
@@ -14,7 +25,7 @@ Deno.serve(async (req) => {
   const url = new URL(req.url);
   const lat = Number(url.searchParams.get("lat"));
   const lon = Number(url.searchParams.get("lon"));
-  const radiusKm = Math.min(50, Math.max(5, Number(url.searchParams.get("radius") || 20)));
+  const radiusKm = Math.min(100, Math.max(5, Number(url.searchParams.get("radius") || 50)));
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
     return json({ error: "Koordinat GPS tidak valid" }, 400);
   }
@@ -26,20 +37,22 @@ Deno.serve(async (req) => {
     [Math.min(90, lat + latDelta), Math.min(180, lon + lonDelta)],
   ]];
 
-  const ships = new Map<number, Record<string, unknown>>();
+  const ships = new Map<number, Ship>();
+  const names = new Map<number, string>();
   let socket: WebSocket | null = null;
 
   try {
-    const result = await new Promise<{ ships: Record<string, unknown>[]; streamError?: string }>((resolve) => {
+    const result = await new Promise<{ ships: Ship[]; streamError?: string }>((resolve) => {
       let finished = false;
       const finish = (streamError?: string) => {
         if (finished) return;
         finished = true;
+        clearTimeout(timer);
         try { socket?.close(); } catch (_) {}
         resolve({ ships: [...ships.values()], ...(streamError ? { streamError } : {}) });
       };
 
-      const timer = setTimeout(() => finish(), 7000);
+      const timer = setTimeout(() => finish(), 20000);
       try {
         socket = new WebSocket("wss://stream.aisstream.io/v0/stream");
         socket.binaryType = "arraybuffer";
@@ -47,7 +60,7 @@ Deno.serve(async (req) => {
           socket?.send(JSON.stringify({
             APIKey: apiKey,
             BoundingBoxes: bounds,
-            FilterMessageTypes: ["PositionReport"],
+            FilterMessageTypes: ["PositionReport", "ShipStaticData"],
           }));
         };
         socket.onmessage = async (event) => {
@@ -58,16 +71,30 @@ Deno.serve(async (req) => {
             else if (event.data instanceof Blob) raw = await event.data.text();
             else return;
             const packet = JSON.parse(raw);
-            if (packet.MessageType !== "PositionReport") return;
             const meta = packet.MetaData || {};
+            const mmsi = Number(meta.MMSI ?? packet.Message?.PositionReport?.UserID ?? packet.Message?.ShipStaticData?.UserID);
+            if (!Number.isFinite(mmsi)) return;
+
+            if (packet.MessageType === "ShipStaticData") {
+              const staticData = packet.Message?.ShipStaticData || {};
+              const name = String(staticData.Name || meta.ShipName || "").replace(/@/g, "").trim();
+              if (name) {
+                names.set(mmsi, name);
+                const existing = ships.get(mmsi);
+                if (existing) existing.name = name;
+              }
+              return;
+            }
+
+            if (packet.MessageType !== "PositionReport") return;
             const pos = packet.Message?.PositionReport || {};
             const shipLat = Number(meta.Latitude ?? pos.Latitude);
             const shipLon = Number(meta.Longitude ?? pos.Longitude);
-            const mmsi = Number(meta.MMSI ?? pos.UserID);
-            if (!Number.isFinite(shipLat) || !Number.isFinite(shipLon) || !Number.isFinite(mmsi)) return;
+            if (!Number.isFinite(shipLat) || !Number.isFinite(shipLon)) return;
+            const previous = ships.get(mmsi);
             ships.set(mmsi, {
               mmsi,
-              name: String(meta.ShipName || "Kapal tidak dikenal").trim(),
+              name: names.get(mmsi) || String(meta.ShipName || previous?.name || "Nama kapal belum diterima").replace(/@/g, "").trim(),
               latitude: shipLat,
               longitude: shipLon,
               speedKnots: Number(pos.Sog ?? 0),
@@ -75,16 +102,22 @@ Deno.serve(async (req) => {
               heading: Number(pos.TrueHeading ?? 0),
               receivedAt: new Date().toISOString(),
             });
-          } catch (_) { /* Ignore malformed or non-position AIS messages. */ }
+          } catch (_) { /* Ignore malformed AIS messages. */ }
         };
-        socket.onerror = () => { clearTimeout(timer); finish("Koneksi AISStream gagal"); };
-        socket.onclose = () => { clearTimeout(timer); finish(); };
+        socket.onerror = () => finish("Koneksi AISStream gagal");
+        socket.onclose = () => finish();
       } catch (_) {
-        clearTimeout(timer);
         finish("Tidak dapat membuka koneksi AISStream");
       }
     });
-    return json({ ships: result.ships, count: result.ships.length, radiusKm, streamError: result.streamError || null });
+    return json({
+      ships: result.ships,
+      count: result.ships.length,
+      radiusKm,
+      listeningSeconds: 20,
+      streamError: result.streamError || null,
+      message: result.ships.length ? null : "Tidak ada siaran AIS yang diterima dalam jendela pemantauan ini. Coba perluas radius atau periksa cakupan AISStream.",
+    });
   } catch (_) {
     return json({ error: "Gagal mengambil data AIS" }, 502);
   }
