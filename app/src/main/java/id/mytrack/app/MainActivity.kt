@@ -16,6 +16,7 @@ import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.*
@@ -152,6 +153,8 @@ private fun MytrackScreen() {
     var navigationActive by remember { mutableStateOf(false) }
     var routeLoading by remember { mutableStateOf(false) }
     var selectedMenu by remember { mutableStateOf<String?>(null) }
+    var menuExpanded by remember { mutableStateOf(false) }
+    var savedLocation by remember { mutableStateOf(prefs.getString("saved_location", "") ?: "") }
     var partnerLocation by remember { mutableStateOf<LatLng?>(null) }
     var pairCode by remember { mutableStateOf(prefs.getString("pair_code", "") ?: "") }
     var codeInput by remember { mutableStateOf(pairCode) }
@@ -479,7 +482,7 @@ private fun MytrackScreen() {
             shape = RoundedCornerShape(22.dp), color = Color.White.copy(alpha = 0.96f), shadowElevation = 8.dp
         ) {
             Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Navy)
+                IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Navy) }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
                     Text("MYtrack", fontWeight = FontWeight.Bold, color = Navy, style = MaterialTheme.typography.titleLarge)
@@ -551,6 +554,71 @@ private fun MytrackScreen() {
                 Text("$routeDestinationName • $routeSummary", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
                 Text("Ikuti garis biru pada peta. Petunjuk belokan lanjutan dan suara belum tersedia.", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
                 TextButton(onClick = { navigationActive = false }) { Text("Akhiri navigasi") }
+            }
+        }
+    }
+
+
+    if (menuExpanded) {
+        ModalBottomSheet(
+            onDismissRequest = { menuExpanded = false },
+            containerColor = Color.White,
+            dragHandle = { BottomSheetDefaults.DragHandle() }
+        ) {
+            Column(
+                Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 18.dp, vertical = 8.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
+                Text("Menu MYtrack", color = Navy, style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                Text("Pilih fitur yang ingin digunakan", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                ListItem(headlineContent = { Text("Peta utama") }, supportingContent = { Text("Kembali melihat peta dan posisi saat ini") }, leadingContent = { Icon(Icons.Default.Map, contentDescription = null, tint = Blue) }, modifier = Modifier.fillMaxWidth().clickable { menuExpanded = false })
+                ListItem(headlineContent = { Text("Pencarian lokasi") }, supportingContent = { Text("Cari alamat, tempat, pelabuhan, atau kota") }, leadingContent = { Icon(Icons.Default.Search, contentDescription = null, tint = Blue) }, modifier = Modifier.fillMaxWidth().clickable { menuExpanded = false; selectedMenu = "Pencarian lokasi" })
+                ListItem(headlineContent = { Text("Navigasi / rute") }, supportingContent = { Text(if (routePoints.isNotEmpty()) routeSummary.ifBlank { "Lihat rute yang sudah dibuat" } else "Cari tujuan untuk membuat rute") }, leadingContent = { Icon(Icons.Default.Navigation, contentDescription = null, tint = Blue) }, modifier = Modifier.fillMaxWidth().clickable { menuExpanded = false; if (routePoints.isNotEmpty()) navigationActive = true else selectedMenu = "Pencarian lokasi" })
+                ListItem(headlineContent = { Text("Berbagi lokasi") }, supportingContent = { Text("Aktifkan berbagi lokasi dengan kode pasangan") }, leadingContent = { Icon(Icons.Default.LocationOn, contentDescription = null, tint = Blue) }, modifier = Modifier.fillMaxWidth().clickable { menuExpanded = false; selectedMenu = "Berbagi Lokasi" })
+                ListItem(headlineContent = { Text("Pasangan") }, supportingContent = { Text("Lihat lokasi perangkat pasangan") }, leadingContent = { Icon(Icons.Default.People, contentDescription = null, tint = Blue) }, modifier = Modifier.fillMaxWidth().clickable { menuExpanded = false; selectedMenu = "Pasangan" })
+                ListItem(headlineContent = { Text("Radar kapal AIS") }, supportingContent = { Text("Pantau kapal yang mengirim data AIS") }, leadingContent = { Icon(Icons.Default.DirectionsBoat, contentDescription = null, tint = Blue) }, modifier = Modifier.fillMaxWidth().clickable { menuExpanded = false; selectedMenu = "Radar Kapal AIS" })
+                Divider()
+                Text("Akses cepat", color = Navy, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 6.dp))
+                ListItem(headlineContent = { Text("Simpan lokasi saya") }, supportingContent = { Text("Simpan koordinat saat ini di perangkat") }, leadingContent = { Icon(Icons.Default.BookmarkAdd, contentDescription = null, tint = Blue) }, modifier = Modifier.fillMaxWidth().clickable {
+                    menuExpanded = false
+                    val p = myLocation
+                    if (p != null) {
+                        savedLocation = "${p.latitude},${p.longitude}"
+                        prefs.edit().putString("saved_location", savedLocation).apply()
+                        android.widget.Toast.makeText(context, "Lokasi berhasil disimpan", android.widget.Toast.LENGTH_SHORT).show()
+                    } else android.widget.Toast.makeText(context, "Lokasi GPS belum tersedia", android.widget.Toast.LENGTH_SHORT).show()
+                })
+                ListItem(headlineContent = { Text("Lihat lokasi tersimpan") }, supportingContent = { Text(if (savedLocation.isBlank()) "Belum ada lokasi tersimpan" else savedLocation) }, leadingContent = { Icon(Icons.Default.Bookmarks, contentDescription = null, tint = Blue) }, modifier = Modifier.fillMaxWidth().clickable {
+                    menuExpanded = false
+                    val parts = savedLocation.split(",")
+                    val lat = parts.getOrNull(0)?.toDoubleOrNull()
+                    val lon = parts.getOrNull(1)?.toDoubleOrNull()
+                    if (lat != null && lon != null) {
+                        searchedPlace = LatLng(lat, lon)
+                        searchQuery = "Lokasi tersimpan"
+                    } else android.widget.Toast.makeText(context, "Belum ada lokasi tersimpan", android.widget.Toast.LENGTH_SHORT).show()
+                })
+                ListItem(headlineContent = { Text("Bagikan koordinat") }, supportingContent = { Text("Kirim lokasi melalui aplikasi lain") }, leadingContent = { Icon(Icons.Default.Share, contentDescription = null, tint = Blue) }, modifier = Modifier.fillMaxWidth().clickable {
+                    menuExpanded = false
+                    val p = myLocation
+                    if (p != null) {
+                        val shareText = "Lokasi saya: https://maps.google.com/?q=${p.latitude},${p.longitude}"
+                        val send = android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, shareText)
+                        context.startActivity(android.content.Intent.createChooser(send, "Bagikan lokasi"))
+                    } else android.widget.Toast.makeText(context, "Lokasi GPS belum tersedia", android.widget.Toast.LENGTH_SHORT).show()
+                })
+                ListItem(headlineContent = { Text("Salin koordinat") }, supportingContent = { Text("Salin latitude dan longitude") }, leadingContent = { Icon(Icons.Default.ContentCopy, contentDescription = null, tint = Blue) }, modifier = Modifier.fillMaxWidth().clickable {
+                    menuExpanded = false
+                    val p = myLocation
+                    if (p != null) {
+                        val clipboard = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+                        clipboard.setPrimaryClip(android.content.ClipData.newPlainText("Koordinat MYtrack", "${p.latitude}, ${p.longitude}"))
+                        android.widget.Toast.makeText(context, "Koordinat disalin", android.widget.Toast.LENGTH_SHORT).show()
+                    } else android.widget.Toast.makeText(context, "Lokasi GPS belum tersedia", android.widget.Toast.LENGTH_SHORT).show()
+                })
+                ListItem(headlineContent = { Text("Pengaturan") }, supportingContent = { Text("Izin lokasi dan informasi perangkat") }, leadingContent = { Icon(Icons.Default.Settings, contentDescription = null, tint = Blue) }, modifier = Modifier.fillMaxWidth().clickable { menuExpanded = false; selectedMenu = "Pengaturan" })
+                Spacer(Modifier.height(10.dp))
             }
         }
     }
@@ -686,8 +754,19 @@ private fun MytrackScreen() {
                     "Pengaturan" -> {
                         Text("Izin lokasi: ${if (permissionGranted) "Aktif" else "Belum diberikan"}", color = Navy)
                         Text("Nama lokasi: $myPlaceName", color = Color.Gray)
+                        Text("Lokasi tersimpan: ${if (savedLocation.isBlank()) "Belum ada" else savedLocation}", color = Color.Gray)
                         OutlinedButton(onClick = { requestLocation() }, modifier = Modifier.fillMaxWidth()) {
                             Icon(Icons.Default.MyLocation, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("Perbarui lokasi sekarang")
+                        }
+                        OutlinedButton(onClick = {
+                            val point = myLocation
+                            if (point != null) {
+                                savedLocation = "${point.latitude},${point.longitude}"
+                                prefs.edit().putString("saved_location", savedLocation).apply()
+                                android.widget.Toast.makeText(context, "Lokasi berhasil disimpan", android.widget.Toast.LENGTH_SHORT).show()
+                            } else android.widget.Toast.makeText(context, "Lokasi GPS belum tersedia", android.widget.Toast.LENGTH_SHORT).show()
+                        }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.BookmarkAdd, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("Simpan lokasi saat ini")
                         }
                     }
                 }
