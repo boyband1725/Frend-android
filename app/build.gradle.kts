@@ -6,10 +6,8 @@ plugins {
 
 android {
     namespace = "id.mytrack.app"
-    val buildVersionCode = providers.environmentVariable("MYTRACK_VERSION_CODE")
-        .orElse("3").get().toInt()
-    val buildVersionName = providers.environmentVariable("MYTRACK_VERSION_NAME")
-        .orElse("1.0.2").get()
+    val buildVersionCode = providers.environmentVariable("MYTRACK_VERSION_CODE").orElse("3").get().toInt()
+    val buildVersionName = providers.environmentVariable("MYTRACK_VERSION_NAME").orElse("1.0.2").get()
     val signingStoreFile = providers.environmentVariable("MYTRACK_KEYSTORE_FILE").orNull
     val signingStorePassword = providers.environmentVariable("MYTRACK_KEYSTORE_PASSWORD").orNull
     val signingKeyAlias = providers.environmentVariable("MYTRACK_KEY_ALIAS").orNull
@@ -45,9 +43,7 @@ android {
             if (hasReleaseSigning) signingConfig = signingConfigs.getByName("stableRelease")
         }
         release {
-            if (!hasReleaseSigning) {
-                throw GradleException("MYtrack stable signing secrets are required for release builds.")
-            }
+            if (!hasReleaseSigning) throw GradleException("MYtrack stable signing secrets are required for release builds.")
             signingConfig = signingConfigs.getByName("stableRelease")
             isMinifyEnabled = false
         }
@@ -72,6 +68,8 @@ dependencies {
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("com.google.android.gms:play-services-location:21.3.0")
+    // LatLng is retained only as a coordinate data type; map rendering uses OpenStreetMap.
+    implementation("com.google.android.gms:play-services-maps:19.2.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
