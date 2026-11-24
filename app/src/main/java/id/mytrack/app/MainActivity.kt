@@ -36,6 +36,7 @@ import org.osmdroid.util.GeoPoint
 import org.osmdroid.views.MapView
 import org.osmdroid.views.overlay.Marker as OsmMarker
 import org.osmdroid.views.overlay.CopyrightOverlay
+import org.osmdroid.views.overlay.Polyline
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -92,6 +93,12 @@ private fun MytrackScreen() {
     var searchQuery by remember { mutableStateOf("") }
     var searchStatus by remember { mutableStateOf("") }
     var searchedPlace by remember { mutableStateOf<LatLng?>(null) }
+    var routePoints by remember { mutableStateOf<List<GeoPoint>>(emptyList()) }
+    var routeInstruction by remember { mutableStateOf("") }
+    var routeSummary by remember { mutableStateOf("") }
+    var routeDestinationName by remember { mutableStateOf("") }
+    var navigationActive by remember { mutableStateOf(false) }
+    var routeLoading by remember { mutableStateOf(false) }
     var partnerLocation by remember { mutableStateOf<LatLng?>(null) }
     var pairCode by remember { mutableStateOf(prefs.getString("pair_code", "") ?: "") }
     var codeInput by remember { mutableStateOf(pairCode) }
@@ -128,6 +135,61 @@ private fun MytrackScreen() {
                 }
                 .addOnFailureListener { status = "Gagal mengambil lokasi: ${it.localizedMessage}" }
         } catch (_: SecurityException) { status = "Izin lokasi belum diberikan" }
+    }
+
+    suspend fun buildRoute(destination: LatLng, destinationName: String) {
+        val origin = myLocation
+        if (origin == null) {
+            searchStatus = "Lokasi GPS belum tersedia. Tekan tombol lokasi lalu coba lagi."
+            return
+        }
+        routeLoading = true
+        searchStatus = "Menghitung rute…"
+        try {
+            val url = "https://router.project-osrm.org/route/v1/driving/${origin.longitude},${origin.latitude};${destination.longitude},${destination.latitude}?overview=full&geometries=geojson&steps=true"
+            val result = withContext(Dispatchers.IO) {
+                val req = Request.Builder().url(url).header("User-Agent", "id.mytrack.app").get().build()
+                client.newCall(req).execute().use { response ->
+                    val body = response.body?.string().orEmpty()
+                    if (!response.isSuccessful) throw IllegalStateException("Layanan rute HTTP ${response.code}")
+                    JSONObject(body)
+                }
+            }
+            val route = result.optJSONArray("routes")?.optJSONObject(0)
+                ?: throw IllegalStateException("Rute kendaraan tidak ditemukan")
+            val coords = route.getJSONObject("geometry").getJSONArray("coordinates")
+            routePoints = (0 until coords.length()).mapNotNull { i ->
+                val pair = coords.optJSONArray(i) ?: return@mapNotNull null
+                if (pair.length() < 2) null else GeoPoint(pair.getDouble(1), pair.getDouble(0))
+            }
+            val km = route.optDouble("distance", 0.0) / 1000.0
+            val minutes = route.optDouble("duration", 0.0) / 60.0
+            routeSummary = String.format(Locale("id", "ID"), "%.1f km • sekitar %.0f menit", km, minutes)
+            routeDestinationName = destinationName
+            val steps = route.optJSONArray("legs")?.optJSONObject(0)?.optJSONArray("steps")
+            val first = steps?.optJSONObject(0)
+            val maneuver = first?.optJSONObject("maneuver")
+            val road = first?.optString("name", "").orEmpty()
+            val type = maneuver?.optString("type", "depart").orEmpty()
+            val modifier = maneuver?.optString("modifier", "").orEmpty()
+            routeInstruction = when (type) {
+                "depart" -> "Mulai perjalanan"
+                "arrive" -> "Anda tiba di tujuan"
+                "turn" -> "Belok ${modifier.ifBlank { "sesuai petunjuk" }}"
+                "roundabout", "rotary" -> "Masuk bundaran"
+                "continue" -> "Terus ikuti jalan"
+                "new name" -> "Lanjut ke jalan berikutnya"
+                else -> "Ikuti rute"
+            } + if (road.isNotBlank()) " ke $road" else ""
+            navigationActive = false
+            searchStatus = "Rute ditemukan: $routeSummary"
+            selectedMenu = null
+        } catch (e: Exception) {
+            routePoints = emptyList()
+            searchStatus = "Gagal membuat rute: ${e.localizedMessage ?: "periksa koneksi internet"}"
+        } finally {
+            routeLoading = false
+        }
     }
 
     val permissionLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
@@ -341,6 +403,20 @@ private fun MytrackScreen() {
         }
     }
 
+    if (navigationActive && routePoints.isNotEmpty()) {
+        Surface(
+            modifier = Modifier.fillMaxWidth().statusBarsPadding().padding(top = 150.dp, start = 14.dp, end = 14.dp),
+            shape = RoundedCornerShape(18.dp), color = Color.White, shadowElevation = 8.dp
+        ) {
+            Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(routeInstruction, color = Navy, fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Text("$routeDestinationName • $routeSummary", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                Text("Ikuti garis biru pada peta. Petunjuk belokan lanjutan dan suara belum tersedia.", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+                TextButton(onClick = { navigationActive = false }) { Text("Akhiri navigasi") }
+            }
+        }
+    }
+
     if (selectedMenu != null) {
         ModalBottomSheet(
             onDismissRequest = { selectedMenu = null },
@@ -439,6 +515,35 @@ private fun MytrackScreen() {
                             }
                         }) { Icon(Icons.Default.Search, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("Cari") }
                         Text(searchStatus, color = Blue, style = MaterialTheme.typography.bodySmall)
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = searchedPlace != null && !routeLoading,
+                            onClick = {
+                                val destination = searchedPlace
+                                if (destination != null) scope.launch { buildRoute(destination, searchQuery) }
+                            }
+                        ) {
+                            if (routeLoading) CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Color.White)
+                            else Icon(Icons.Default.Directions, contentDescription = null)
+                            Spacer(Modifier.width(8.dp))
+                            Text(if (routeLoading) "Menghitung rute…" else "Buat rute ke sini")
+                        }
+                        if (routePoints.isNotEmpty()) {
+                            Text(routeSummary, fontWeight = FontWeight.SemiBold, color = Navy)
+                            Text(routeInstruction, color = Color.DarkGray, style = MaterialTheme.typography.bodySmall)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Button(modifier = Modifier.weight(1f), onClick = {
+                                    navigationActive = true
+                                    selectedMenu = null
+                                }) { Icon(Icons.Default.Navigation, contentDescription = null); Spacer(Modifier.width(6.dp)); Text("Mulai navigasi") }
+                                OutlinedButton(onClick = {
+                                    routePoints = emptyList()
+                                    routeSummary = ""
+                                    routeInstruction = ""
+                                    navigationActive = false
+                                }) { Text("Hapus rute") }
+                            }
+                        }
                     }
                     "Pengaturan" -> {
                         Text("Izin lokasi: ${if (permissionGranted) "Aktif" else "Belum diberikan"}", color = Navy)
