@@ -6,9 +6,6 @@ plugins {
 
 android {
     namespace = "id.mytrack.app"
-    val mapsApiKey = providers.gradleProperty("MAPS_API_KEY")
-        .orElse(providers.environmentVariable("MAPS_API_KEY"))
-        .orElse("REPLACE_WITH_GOOGLE_MAPS_API_KEY").get()
     val buildVersionCode = providers.environmentVariable("MYTRACK_VERSION_CODE")
         .orElse("3").get().toInt()
     val buildVersionName = providers.environmentVariable("MYTRACK_VERSION_NAME")
@@ -39,8 +36,6 @@ android {
         targetSdk = 35
         versionCode = buildVersionCode
         versionName = buildVersionName
-        manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
-        buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
         buildConfigField("String", "SUPABASE_URL", "\"https://tyhulcbdqrvnpkillrij.supabase.co\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"sb_publishable_exImSNccvxIoi_kO3TxxcQ_itatkoa_\"")
     }
@@ -76,7 +71,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     implementation("androidx.compose.material3:material3")
     implementation("androidx.compose.material:material-icons-extended")
-    implementation("com.google.android.gms:play-services-maps:19.2.0")
     implementation("com.google.android.gms:play-services-location:21.3.0")
     implementation("org.osmdroid:osmdroid-android:6.1.20")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
