@@ -101,7 +101,7 @@ private fun shipMarkerIcon(context: android.content.Context, shipType: Int): Bit
         moveTo(56f, 9f)
         lineTo(78f, 39f)
         lineTo(73f, 82f)
-        quadraticTo(56f, 101f, 39f, 82f)
+        quadTo(56f, 101f, 39f, 82f)
         lineTo(34f, 39f)
         close()
     }
