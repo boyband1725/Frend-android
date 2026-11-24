@@ -308,6 +308,14 @@ private fun MytrackScreen() {
             },
             update = { map ->
                 map.overlays.clear()
+                if (routePoints.size > 1) {
+                    val routeLine = Polyline(map).apply {
+                        setPoints(routePoints)
+                        outlinePaint.color = android.graphics.Color.rgb(30, 110, 230)
+                        outlinePaint.strokeWidth = 14f
+                    }
+                    map.overlays.add(routeLine)
+                }
                 fun addPin(point: LatLng, title: String, detail: String) {
                     val marker = OsmMarker(map)
                     marker.position = GeoPoint(point.latitude, point.longitude)
@@ -323,13 +331,35 @@ private fun MytrackScreen() {
                     addPin(LatLng(ship.latitude, ship.longitude), ship.name.ifBlank { "Kapal ${ship.mmsi}" },
                         "MMSI ${ship.mmsi} • ${ship.speedKnots} kn • arah ${ship.course}°")
                 }
-                map.overlays.add(CopyrightOverlay(context))
-                val centerKey = myLocation?.let { "${it.latitude},${it.longitude}" }.orEmpty()
-                if (centerKey.isNotEmpty() && map.tag != centerKey) {
-                    map.controller.animateTo(GeoPoint(myLocation!!.latitude, myLocation!!.longitude))
-                    map.controller.setZoom(15.0)
-                    map.tag = centerKey
+                if (routePoints.isNotEmpty()) {
+                    val start = routePoints.first()
+                    val end = routePoints.last()
+                    val startMarker = OsmMarker(map).apply {
+                        position = start
+                        title = "Mulai"
+                        setAnchor(OsmMarker.ANCHOR_CENTER, OsmMarker.ANCHOR_BOTTOM)
+                    }
+                    val endMarker = OsmMarker(map).apply {
+                        position = end
+                        title = "Tujuan: $routeDestinationName"
+                        setAnchor(OsmMarker.ANCHOR_CENTER, OsmMarker.ANCHOR_BOTTOM)
+                    }
+                    map.overlays.add(startMarker)
+                    map.overlays.add(endMarker)
+                    val routeKey = "route:${routePoints.size}:${start.latitude}:${end.longitude}"
+                    if (map.tag != routeKey) {
+                        map.zoomToBoundingBox(org.osmdroid.util.BoundingBox.fromGeoPoints(routePoints), true, 72)
+                        map.tag = routeKey
+                    }
+                } else {
+                    val centerKey = myLocation?.let { "loc:${it.latitude},${it.longitude}" }.orEmpty()
+                    if (centerKey.isNotEmpty() && map.tag != centerKey) {
+                        map.controller.animateTo(GeoPoint(myLocation!!.latitude, myLocation!!.longitude))
+                        map.controller.setZoom(15.0)
+                        map.tag = centerKey
+                    }
                 }
+                map.overlays.add(CopyrightOverlay(context))
                 map.invalidate()
             }
         )
