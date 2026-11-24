@@ -332,6 +332,7 @@ private fun MytrackScreen() {
                     }.distinctBy { it.mmsi }
                         .sortedBy { ship -> distanceKm(point.latitude, point.longitude, ship.latitude, ship.longitude) }
                     val streamError = radarResult.optString("streamError", "")
+                    val connectionDiagnostic = radarResult.optString("connectionDiagnostic", "")
                     val message = radarResult.optString("message", "")
                     val confirmed = radarResult.optBoolean("subscriptionConfirmed", false)
                     val compressed = radarResult.optBoolean("compressionEnabled", false)
@@ -341,7 +342,9 @@ private fun MytrackScreen() {
                         (counts?.optInt("ExtendedClassBPositionReport", 0) ?: 0)
                     radarStatus = when {
                         aisShips.isNotEmpty() -> "${aisShips.size} kapal AIS terdeteksi • radius 20 km"
-                        streamError.isNotBlank() && streamError != "null" -> "Sumber AIS bermasalah: $streamError"
+                        streamError.isNotBlank() && streamError != "null" ->
+                            "Sumber AIS bermasalah: $streamError" +
+                                if (connectionDiagnostic.isNotBlank()) "\n$connectionDiagnostic" else ""
                         !confirmed -> message.ifBlank { "AISStream belum mengonfirmasi koneksi" }
                         !compressed -> "Koneksi AIS aktif, tetapi kompresi data belum aktif"
                         positionPackets == 0 -> "AIS tersambung dan terkompresi; belum ada laporan posisi kapal dalam sampel 45 detik"
