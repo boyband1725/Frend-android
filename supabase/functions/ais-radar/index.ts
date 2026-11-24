@@ -42,24 +42,8 @@ Deno.serve(async (req) => {
     [Math.min(90, lat + latDelta), Math.min(180, lon + lonDelta)],
   ]];
 
-  // Diagnose DNS/TLS/routing separately from the WebSocket upgrade.
-  // HTTP 400/426 still proves that the provider host is reachable.
-  let upstreamHttpStatus: number | null = null;
-  let upstreamProbeError: string | null = null;
-  let upstreamProbeMs: number | null = null;
-  const probeStarted = Date.now();
-  try {
-    const probe = await fetch("https://stream.aisstream.io/v0/stream", {
-      method: "GET",
-      signal: AbortSignal.timeout(8000),
-    });
-    upstreamHttpStatus = probe.status;
-    await probe.body?.cancel();
-  } catch (error) {
-    upstreamProbeError = error instanceof Error ? error.message : String(error);
-  } finally {
-    upstreamProbeMs = Date.now() - probeStarted;
-  }
+  // AISStream is WebSocket-only. Do not issue a plain HTTPS GET probe:
+  // it adds latency and can time out even when the WebSocket endpoint is usable.
 
   const ships = new Map<number, Ship>();
   const names = new Map<number, string>();
@@ -83,12 +67,12 @@ Deno.serve(async (req) => {
       };
 
       // Collect a useful live sample while keeping the HTTP request short-lived.
-      const timer = setTimeout(() => finish(), 45000);
+      const timer = setTimeout(() => finish(), 35000);
       try {
         // AISStream requires permessage-deflate for full message bandwidth.
         socket = new WebSocket("wss://stream.aisstream.io/v0/stream", {
           perMessageDeflate: true,
-          handshakeTimeout: 15000,
+          handshakeTimeout: 20000,
         });
 
         socket.on("open", () => {
@@ -199,11 +183,11 @@ Deno.serve(async (req) => {
           ? "AISStream menerima koneksi tetapi kompresi permessage-deflate tidak aktif."
           : "Langganan dan kompresi AISStream aktif, tetapi belum ada laporan posisi kapal pada jendela pemantauan ini. Periksa cakupan penerima AIS di area tersebut.";
 
-    const connectionDiagnostic = upstreamHttpStatus !== null
-      ? "Host AISStream terjangkau melalui HTTPS (HTTP " + upstreamHttpStatus + ", " + upstreamProbeMs + " ms)." +
-        (result.streamError ? " WebSocket gagal: " + result.streamError : "")
-      : "Probe HTTPS ke AISStream gagal setelah " + upstreamProbeMs + " ms: " +
-        (upstreamProbeError || "penyebab tidak diketahui");
+    const connectionDiagnostic = result.streamError
+      ? "Koneksi WebSocket AISStream gagal: " + result.streamError
+      : subscriptionConfirmed
+        ? "WebSocket tersambung dan langganan AIS dikonfirmasi."
+        : "WebSocket terbuka, tetapi konfirmasi langganan AIS belum diterima.";
 
     return json({
       ships: shipList,
@@ -215,9 +199,6 @@ Deno.serve(async (req) => {
       messageCounts,
       closeCode,
       closeReason,
-      upstreamHttpStatus,
-      upstreamProbeMs,
-      upstreamProbeError,
       connectionDiagnostic,
       streamError: result.streamError || null,
       message,
