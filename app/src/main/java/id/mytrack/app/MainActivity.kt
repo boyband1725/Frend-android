@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.pm.PackageManager
 import android.location.Geocoder
 import android.os.Bundle
+import org.osmdroid.config.Configuration
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -24,15 +25,17 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
-import com.google.android.gms.maps.CameraUpdateFactory
-import com.google.android.gms.maps.model.CameraPosition
 import com.google.android.gms.maps.model.LatLng
-import com.google.android.gms.maps.model.MapStyleOptions
-import com.google.maps.android.compose.*
+import org.osmdroid.tileprovider.tilesource.TileSourceFactory
+import org.osmdroid.util.GeoPoint
+import org.osmdroid.views.MapView
+import org.osmdroid.views.overlay.Marker as OsmMarker
+import org.osmdroid.views.overlay.CopyrightOverlay
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
@@ -102,11 +105,7 @@ private fun MytrackScreen() {
     var aisShips by remember { mutableStateOf<List<AisShip>>(emptyList()) }
     var radarStatus by remember { mutableStateOf("Radar kapal nonaktif") }
     val client = remember { OkHttpClient() }
-    val mapsKeyConfigured = BuildConfig.MAPS_API_KEY.isNotBlank() && !BuildConfig.MAPS_API_KEY.startsWith("REPLACE_") && !BuildConfig.MAPS_API_KEY.startsWith("YOUR_")
-    val mapStyle = remember { MapStyleOptions("""[{"elementType":"geometry","stylers":[{"color":"#edf2f5"}]},{"elementType":"labels.text.fill","stylers":[{"color":"#52616b"}]},{"elementType":"labels.text.stroke","stylers":[{"color":"#ffffff"}]},{"featureType":"road","elementType":"geometry","stylers":[{"color":"#ffffff"}]},{"featureType":"road.highway","elementType":"geometry","stylers":[{"color":"#d8e4ee"}]},{"featureType":"water","elementType":"geometry","stylers":[{"color":"#b9d9eb"}]},{"featureType":"poi.park","elementType":"geometry","stylers":[{"color":"#d8eadb"}]},{"featureType":"transit","stylers":[{"visibility":"simplified"}]}]""") }
-    val camera = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(LatLng(-6.2, 106.816666), 12f)
-    }
+    LaunchedEffect(Unit) { Configuration.getInstance().userAgentValue = context.packageName }
 
     fun requestLocation() {
         if (!permissionGranted) return
@@ -117,7 +116,6 @@ private fun MytrackScreen() {
                         val point = LatLng(loc.latitude, loc.longitude)
                         myLocation = point
                         scope.launch {
-                            camera.animate(CameraUpdateFactory.newLatLngZoom(point, 16f))
                             myPlaceName = try {
                                 withContext(Dispatchers.IO) {
                                     @Suppress("DEPRECATION")
@@ -241,31 +239,45 @@ private fun MytrackScreen() {
     }) { padding ->
         Column(Modifier.fillMaxSize().padding(padding)) {
             Box(Modifier.weight(1f).fillMaxWidth()) {
-                GoogleMap(
+                AndroidView(
                     modifier = Modifier.fillMaxSize(),
-                    cameraPositionState = camera,
-                    properties = MapProperties(isMyLocationEnabled = permissionGranted, mapStyleOptions = mapStyle),
-                    uiSettings = MapUiSettings(zoomControlsEnabled = false, myLocationButtonEnabled = false, compassEnabled = true, mapToolbarEnabled = false)
-                ) {
-                    myLocation?.let { Marker(state = MarkerState(position = it), title = "Lokasi saya", snippet = myPlaceName) }
-                    searchedPlace?.let { Marker(state = MarkerState(position = it), title = searchQuery, snippet = "Hasil pencarian") }
-                    partnerLocation?.let { Marker(state = MarkerState(position = it), title = "Pasangan", snippet = lastPartnerUpdate) }
-                    aisShips.forEach { ship ->
-                        Marker(
-                            state = MarkerState(position = LatLng(ship.latitude, ship.longitude)),
-                            title = ship.name.ifBlank { "Kapal ${ship.mmsi}" },
-                            snippet = "MMSI ${ship.mmsi} • ${ship.speedKnots} kn • arah ${ship.course}°"
-                        )
-                    }
-                }
-                if (!mapsKeyConfigured) {
-                    Card(Modifier.align(Alignment.Center).padding(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White), elevation = CardDefaults.cardElevation(6.dp)) {
-                        Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text("Peta belum terhubung", color = Navy, fontWeight = FontWeight.Bold)
-                            Text("Google Maps API Key belum dipasang pada GitHub Secrets dengan nama MAPS_API_KEY. Tambahkan kunci Google Maps agar jalan, wilayah, dan nama tempat tampil.", color = Color.DarkGray, style = MaterialTheme.typography.bodySmall)
+                    factory = { ctx ->
+                        MapView(ctx).apply {
+                            setTileSource(TileSourceFactory.MAPNIK)
+                            setMultiTouchControls(true)
+                            setBuiltInZoomControls(false)
+                            controller.setZoom(12.0)
+                            controller.setCenter(GeoPoint(-6.2, 106.816666))
+                            tag = ""
                         }
+                    },
+                    update = { map ->
+                        map.overlays.clear()
+                        fun addPin(point: LatLng, title: String, detail: String) {
+                            val marker = OsmMarker(map)
+                            marker.position = GeoPoint(point.latitude, point.longitude)
+                            marker.title = title
+                            marker.snippet = detail
+                            marker.setAnchor(OsmMarker.ANCHOR_CENTER, OsmMarker.ANCHOR_BOTTOM)
+                            map.overlays.add(marker)
+                        }
+                        myLocation?.let { addPin(it, "Lokasi saya", myPlaceName) }
+                        searchedPlace?.let { addPin(it, searchQuery.ifBlank { "Tempat dicari" }, "Hasil pencarian") }
+                        partnerLocation?.let { addPin(it, "Pasangan", lastPartnerUpdate) }
+                        aisShips.forEach { ship ->
+                            addPin(LatLng(ship.latitude, ship.longitude), ship.name.ifBlank { "Kapal ${ship.mmsi}" }, "MMSI ${ship.mmsi} • ${ship.speedKnots} kn • arah ${ship.course}°")
+                        }
+                        map.overlays.add(CopyrightOverlay(context))
+                        val centerKey = myLocation?.let { "${it.latitude},${it.longitude}" }.orEmpty()
+                        if (centerKey.isNotEmpty() && map.tag != centerKey) {
+                            map.controller.animateTo(GeoPoint(myLocation!!.latitude, myLocation!!.longitude))
+                            map.controller.setZoom(15.0)
+                            map.tag = centerKey
+                        }
+                        map.invalidate()
                     }
-                } else if (myLocation == null) {
+                )
+                if (myLocation == null) {
                     Card(Modifier.align(Alignment.Center).padding(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
                         Text("Aktifkan izin lokasi untuk melihat posisi kamu", Modifier.padding(16.dp), color = Navy)
                     }
