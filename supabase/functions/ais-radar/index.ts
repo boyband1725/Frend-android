@@ -45,6 +45,7 @@ Deno.serve(async (req) => {
   // AISStream is WebSocket-only. Do not issue a plain HTTPS GET probe:
   // it adds latency and can time out even when the WebSocket endpoint is usable.
 
+  const listeningSeconds = 45;
   const ships = new Map<number, Ship>();
   const names = new Map<number, string>();
   const staticDataByMmsi = new Map<number, { shipType: number; imo: number }>();
@@ -66,8 +67,9 @@ Deno.serve(async (req) => {
         resolve({ ships: [...ships.values()], ...(streamError ? { streamError } : {}) });
       };
 
-      // Collect a useful live sample while keeping the HTTP request short-lived.
-      const timer = setTimeout(() => finish(), 35000);
+      // Keep the collection window and the value reported to Android identical.
+      // Android allows 65 seconds for this request, leaving room for the WebSocket handshake.
+      const timer = setTimeout(() => finish(), listeningSeconds * 1000);
       try {
         // AISStream requires permessage-deflate for full message bandwidth.
         socket = new WebSocket("wss://stream.aisstream.io/v0/stream", {
@@ -193,7 +195,8 @@ Deno.serve(async (req) => {
       ships: shipList,
       count: shipList.length,
       radiusKm,
-      listeningSeconds: 45,
+      center: { latitude: lat, longitude: lon },
+      listeningSeconds,
       subscriptionConfirmed,
       compressionEnabled,
       messageCounts,

@@ -359,7 +359,7 @@ private fun MytrackScreen() {
             } else {
                 radarStatus = "Konfigurasi Supabase belum benar"
             }
-            delay(30000)
+            delay(15000)
         }
     }
 
