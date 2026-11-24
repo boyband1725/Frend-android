@@ -12,11 +12,11 @@ android {
         applicationId = "id.mytrack.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.0.1"
         buildConfigField("String", "MAPS_API_KEY", "\"REPLACE_WITH_GOOGLE_MAPS_API_KEY\"")
-        buildConfigField("String", "SUPABASE_URL", "\"https://YOUR_PROJECT.supabase.co\"")
-        buildConfigField("String", "SUPABASE_ANON_KEY", "\"YOUR_SUPABASE_ANON_KEY\"")
+        buildConfigField("String", "SUPABASE_URL", "\"https://tyhulcbdqrvnpkillrij.supabase.co\"")
+        buildConfigField("String", "SUPABASE_ANON_KEY", "\"sb_publishable_exImSNccvxIoi_kO3TxxcQ_itatkoa_\"")
     }
 
     buildFeatures { compose = true; buildConfig = true }
