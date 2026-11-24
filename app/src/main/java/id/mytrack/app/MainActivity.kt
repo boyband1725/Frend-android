@@ -214,7 +214,7 @@ private fun MytrackScreen() {
                 !BuildConfig.SUPABASE_ANON_KEY.startsWith("YOUR_")) {
                 try {
                     val radarRequest = Request.Builder()
-                        .url("${BuildConfig.SUPABASE_URL}/functions/v1/ais-radar?lat=${point.latitude}&lon=${point.longitude}&radius=20")
+                        .url("${BuildConfig.SUPABASE_URL}/functions/v1/ais-radar?lat=${point.latitude}&lon=${point.longitude}&radius=50")
                         .addHeader("apikey", BuildConfig.SUPABASE_ANON_KEY)
                         .addHeader("Authorization", "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
                         .get().build()
@@ -232,13 +232,13 @@ private fun MytrackScreen() {
                         val lon = item.optDouble("longitude", Double.NaN)
                         if (!lat.isFinite() || !lon.isFinite()) null else AisShip(
                             mmsi = item.optLong("mmsi"),
-                            name = item.optString("name", "Kapal tidak dikenal").trim(),
+                            name = item.optString("name", "Nama kapal belum diterima").trim(),
                             latitude = lat,
                             longitude = lon,
                             speedKnots = item.optDouble("speedKnots", 0.0),
                             course = item.optDouble("course", 0.0)
                         )
-                    }
+                    }.sortedBy { ship -> distanceKm(point.latitude, point.longitude, ship.latitude, ship.longitude) }
                     radarStatus = if (aisShips.isEmpty()) "Belum ada kapal AIS dalam radius 20 km" else "${aisShips.size} kapal terdeteksi dalam radius 20 km"
                 } catch (e: Exception) {
                     radarStatus = "Radar gagal: ${e.localizedMessage ?: "periksa konfigurasi"}"
