@@ -112,6 +112,7 @@ private fun MytrackScreen() {
     var radarEnabled by remember { mutableStateOf(false) }
     var aisShips by remember { mutableStateOf<List<AisShip>>(emptyList()) }
     var radarStatus by remember { mutableStateOf("Radar kapal nonaktif") }
+    var aisAccessToken by remember { mutableStateOf<String?>(null) }
     val client = remember { OkHttpClient() }
     LaunchedEffect(Unit) { Configuration.getInstance().userAgentValue = context.packageName }
 
@@ -213,15 +214,40 @@ private fun MytrackScreen() {
                 !BuildConfig.SUPABASE_URL.contains("YOUR_PROJECT") &&
                 !BuildConfig.SUPABASE_ANON_KEY.startsWith("YOUR_")) {
                 try {
+                    // Edge Function memakai verify_jwt=true. Buat sesi Supabase anonim
+                    // agar permintaan AIS membawa access token JWT, bukan publishable key.
+                    val accessToken = aisAccessToken ?: withContext(Dispatchers.IO) {
+                        val authBody = JSONObject().put("data", JSONObject())
+                            .toString().toRequestBody("application/json".toMediaType())
+                        val authRequest = Request.Builder()
+                            .url("${BuildConfig.SUPABASE_URL}/auth/v1/signup")
+                            .addHeader("apikey", BuildConfig.SUPABASE_ANON_KEY)
+                            .addHeader("Content-Type", "application/json")
+                            .post(authBody).build()
+                        client.newCall(authRequest).execute().use { response ->
+                            val body = response.body?.string().orEmpty()
+                            if (!response.isSuccessful) {
+                                throw IllegalStateException("Login anonim HTTP ${response.code}: $body")
+                            }
+                            JSONObject(body).optString("access_token").takeIf { it.isNotBlank() }
+                                ?: throw IllegalStateException("Supabase tidak mengirim access token. Aktifkan Anonymous Sign-Ins di Supabase Auth.")
+                        }
+                    }
+                    aisAccessToken = accessToken
+
                     val radarRequest = Request.Builder()
-                        .url("${BuildConfig.SUPABASE_URL}/functions/v1/ais-radar?lat=${point.latitude}&lon=${point.longitude}&radius=50")
+                        .url("${BuildConfig.SUPABASE_URL}/functions/v1/ais-radar?lat=${point.latitude}&lon=${point.longitude}&radius=20")
                         .addHeader("apikey", BuildConfig.SUPABASE_ANON_KEY)
-                        .addHeader("Authorization", "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
+                        .addHeader("Authorization", "Bearer $accessToken")
                         .get().build()
                     val radarResult = withContext(Dispatchers.IO) {
                         client.newCall(radarRequest).execute().use { response ->
                             val body = response.body?.string().orEmpty()
-                            if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}: $body")
+                            if (response.code == 401) {
+                                aisAccessToken = null
+                                throw IllegalStateException("Sesi AIS kedaluwarsa atau Anonymous Sign-Ins belum aktif (HTTP 401)")
+                            }
+                            if (!response.isSuccessful) throw IllegalStateException("AIS server HTTP ${response.code}: $body")
                             JSONObject(body)
                         }
                     }
@@ -230,7 +256,7 @@ private fun MytrackScreen() {
                         val item = array.optJSONObject(index) ?: return@mapNotNull null
                         val lat = item.optDouble("latitude", Double.NaN)
                         val lon = item.optDouble("longitude", Double.NaN)
-                        if (!lat.isFinite() || !lon.isFinite()) null else AisShip(
+                        if (!lat.isFinite() || !lon.isFinite() || kotlin.math.abs(lat) > 90 || kotlin.math.abs(lon) > 180) null else AisShip(
                             mmsi = item.optLong("mmsi"),
                             name = item.optString("name", "Nama kapal belum diterima").trim(),
                             latitude = lat,
@@ -238,13 +264,21 @@ private fun MytrackScreen() {
                             speedKnots = item.optDouble("speedKnots", 0.0),
                             course = item.optDouble("course", 0.0)
                         )
-                    }.sortedBy { ship -> distanceKm(point.latitude, point.longitude, ship.latitude, ship.longitude) }
-                    radarStatus = if (aisShips.isEmpty()) "Belum ada kapal AIS dalam radius 20 km" else "${aisShips.size} kapal terdeteksi dalam radius 20 km"
+                    }.distinctBy { it.mmsi }
+                        .sortedBy { ship -> distanceKm(point.latitude, point.longitude, ship.latitude, ship.longitude) }
+                    val streamError = radarResult.optString("streamError", "")
+                    val message = radarResult.optString("message", "")
+                    radarStatus = when {
+                        aisShips.isNotEmpty() -> "${aisShips.size} kapal AIS terdeteksi • radius 20 km"
+                        streamError.isNotBlank() && streamError != "null" -> "Sumber AIS bermasalah: $streamError"
+                        message.isNotBlank() && message != "null" -> message
+                        else -> "Belum ada siaran AIS dalam radius 20 km"
+                    }
                 } catch (e: Exception) {
-                    radarStatus = "Radar gagal: ${e.localizedMessage ?: "periksa konfigurasi"}"
+                    radarStatus = "Radar gagal: ${e.localizedMessage ?: "periksa koneksi dan konfigurasi"}"
                 }
             } else {
-                radarStatus = "Isi URL Supabase dan anon key di konfigurasi aplikasi"
+                radarStatus = "Konfigurasi Supabase belum benar"
             }
             delay(30000)
         }
