@@ -169,7 +169,14 @@ private fun MytrackScreen() {
     var aisShips by remember { mutableStateOf<List<AisShip>>(emptyList()) }
     var radarStatus by remember { mutableStateOf("Radar kapal nonaktif") }
     var aisAccessToken by remember { mutableStateOf<String?>(null) }
-    val client = remember {\n        OkHttpClient.Builder()\n            .connectTimeout(15, TimeUnit.SECONDS)\n            .readTimeout(60, TimeUnit.SECONDS)\n            .writeTimeout(15, TimeUnit.SECONDS)\n            .callTimeout(65, TimeUnit.SECONDS)\n            .build()\n    }
+    val client = remember {
+        OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(60, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .callTimeout(65, TimeUnit.SECONDS)
+            .build()
+    }
     LaunchedEffect(Unit) { Configuration.getInstance().userAgentValue = context.packageName }
 
     fun requestLocation() {
@@ -341,7 +348,10 @@ private fun MytrackScreen() {
                         else -> message.ifBlank { "Paket posisi diterima, menunggu koordinat kapal" }
                     }
                 } catch (e: Exception) {
-                    val cause = e.localizedMessage ?: "periksa koneksi dan konfigurasi"\n                    radarStatus = if (e is java.net.SocketTimeoutException) {\n                        "Waktu tunggu AIS habis. Periksa koneksi server dan AISStream."\n                    } else "Radar gagal: $cause"
+                    val cause = e.localizedMessage ?: "periksa koneksi dan konfigurasi"
+                    radarStatus = if (e is java.net.SocketTimeoutException) {
+                        "Waktu tunggu AIS habis. Periksa koneksi server dan AISStream."
+                    } else "Radar gagal: $cause"
                 }
             } else {
                 radarStatus = "Konfigurasi Supabase belum benar"
