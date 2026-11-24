@@ -1,6 +1,12 @@
 name: Deploy MYtrack AIS Radar
 
 on:
+  push:
+    branches: [ "main" ]
+    paths:
+      - "supabase/functions/ais-radar/**"
+      - "supabase/config.toml"
+      - ".github/workflows/deploy-ais-radar.yml"
   workflow_dispatch:
 
 jobs:
@@ -13,14 +19,20 @@ jobs:
         uses: supabase/setup-cli@v1
         with:
           version: latest
-      - name: Push AIS secret and deploy protected function
+      - name: Validate required deployment secrets
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
           SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
           AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
         run: |
-          test -n "$SUPABASE_ACCESS_TOKEN"
-          test -n "$SUPABASE_PROJECT_REF"
-          test -n "$AISSTREAM_API_KEY"
+          test -n "$SUPABASE_ACCESS_TOKEN" || (echo "Missing GitHub secret SUPABASE_ACCESS_TOKEN" && exit 1)
+          test -n "$SUPABASE_PROJECT_REF" || (echo "Missing GitHub secret SUPABASE_PROJECT_REF" && exit 1)
+          test -n "$AISSTREAM_API_KEY" || (echo "Missing GitHub secret AISSTREAM_API_KEY" && exit 1)
+      - name: Configure AIS provider key and deploy protected function
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+          AISSTREAM_API_KEY: ${{ secrets.AISSTREAM_API_KEY }}
+        run: |
           supabase secrets set AISSTREAM_API_KEY="$AISSTREAM_API_KEY" --project-ref "$SUPABASE_PROJECT_REF" --yes
           supabase functions deploy ais-radar --project-ref "$SUPABASE_PROJECT_REF" --yes
