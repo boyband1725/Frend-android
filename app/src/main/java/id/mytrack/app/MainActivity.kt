@@ -230,162 +230,243 @@ private fun MytrackScreen() {
         }
     }
 
-    Scaffold(containerColor = Pale, topBar = {
-        TopAppBar(
-            title = { Column { Text("MYtrack", fontWeight = FontWeight.Bold, color = Navy); Text("Berbagi lokasi bersama", style = MaterialTheme.typography.labelSmall, color = Color.Gray) } },
-            actions = { IconButton(onClick = { requestLocation() }) { Icon(Icons.Default.MyLocation, contentDescription = "Lokasi saya", tint = Blue) } },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color.White)
-        )
-    }) { padding ->
-        Column(Modifier.fillMaxSize().padding(padding)) {
-            Box(Modifier.weight(1f).fillMaxWidth()) {
-                AndroidView(
-                    modifier = Modifier.fillMaxSize(),
-                    factory = { ctx ->
-                        MapView(ctx).apply {
-                            setTileSource(TileSourceFactory.MAPNIK)
-                            setMultiTouchControls(true)
-                            setBuiltInZoomControls(false)
-                            controller.setZoom(12.0)
-                            controller.setCenter(GeoPoint(-6.2, 106.816666))
-                            tag = ""
-                        }
-                    },
-                    update = { map ->
-                        map.overlays.clear()
-                        fun addPin(point: LatLng, title: String, detail: String) {
-                            val marker = OsmMarker(map)
-                            marker.position = GeoPoint(point.latitude, point.longitude)
-                            marker.title = title
-                            marker.snippet = detail
-                            marker.setAnchor(OsmMarker.ANCHOR_CENTER, OsmMarker.ANCHOR_BOTTOM)
-                            map.overlays.add(marker)
-                        }
-                        myLocation?.let { addPin(it, "Lokasi saya", myPlaceName) }
-                        searchedPlace?.let { addPin(it, searchQuery.ifBlank { "Tempat dicari" }, "Hasil pencarian") }
-                        partnerLocation?.let { addPin(it, "Pasangan", lastPartnerUpdate) }
-                        aisShips.forEach { ship ->
-                            addPin(LatLng(ship.latitude, ship.longitude), ship.name.ifBlank { "Kapal ${ship.mmsi}" }, "MMSI ${ship.mmsi} • ${ship.speedKnots} kn • arah ${ship.course}°")
-                        }
-                        map.overlays.add(CopyrightOverlay(context))
-                        val centerKey = myLocation?.let { "${it.latitude},${it.longitude}" }.orEmpty()
-                        if (centerKey.isNotEmpty() && map.tag != centerKey) {
-                            map.controller.animateTo(GeoPoint(myLocation!!.latitude, myLocation!!.longitude))
-                            map.controller.setZoom(15.0)
-                            map.tag = centerKey
-                        }
-                        map.invalidate()
-                    }
-                )
-                if (myLocation == null) {
-                    Card(Modifier.align(Alignment.Center).padding(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
-                        Text("Aktifkan izin lokasi untuk melihat posisi kamu", Modifier.padding(16.dp), color = Navy)
-                    }
+    var selectedMenu by remember { mutableStateOf<String?>(null) }
+
+    Box(Modifier.fillMaxSize().background(Pale)) {
+        AndroidView(
+            modifier = Modifier.fillMaxSize(),
+            factory = { ctx ->
+                MapView(ctx).apply {
+                    setTileSource(TileSourceFactory.MAPNIK)
+                    setMultiTouchControls(true)
+                    setBuiltInZoomControls(false)
+                    controller.setZoom(12.0)
+                    controller.setCenter(GeoPoint(-6.2, 106.816666))
+                    tag = ""
                 }
-                Surface(Modifier.align(Alignment.TopStart).padding(12.dp), shape = RoundedCornerShape(24.dp), color = Color.White, shadowElevation = 4.dp) {
-                    Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Box(Modifier.size(8.dp).background(if (sharing) Color(0xFF22A06B) else Color.Gray, CircleShape))
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (sharing) "Berbagi aktif" else "Berbagi dijeda", style = MaterialTheme.typography.labelMedium, color = Navy)
-                    }
+            },
+            update = { map ->
+                map.overlays.clear()
+                fun addPin(point: LatLng, title: String, detail: String) {
+                    val marker = OsmMarker(map)
+                    marker.position = GeoPoint(point.latitude, point.longitude)
+                    marker.title = title
+                    marker.snippet = detail
+                    marker.setAnchor(OsmMarker.ANCHOR_CENTER, OsmMarker.ANCHOR_BOTTOM)
+                    map.overlays.add(marker)
+                }
+                myLocation?.let { addPin(it, "Lokasi saya", myPlaceName) }
+                searchedPlace?.let { addPin(it, searchQuery.ifBlank { "Tempat dicari" }, "Hasil pencarian") }
+                partnerLocation?.let { addPin(it, "Pasangan", lastPartnerUpdate) }
+                aisShips.forEach { ship ->
+                    addPin(LatLng(ship.latitude, ship.longitude), ship.name.ifBlank { "Kapal ${ship.mmsi}" },
+                        "MMSI ${ship.mmsi} • ${ship.speedKnots} kn • arah ${ship.course}°")
+                }
+                map.overlays.add(CopyrightOverlay(context))
+                val centerKey = myLocation?.let { "${it.latitude},${it.longitude}" }.orEmpty()
+                if (centerKey.isNotEmpty() && map.tag != centerKey) {
+                    map.controller.animateTo(GeoPoint(myLocation!!.latitude, myLocation!!.longitude))
+                    map.controller.setZoom(15.0)
+                    map.tag = centerKey
+                }
+                map.invalidate()
+            }
+        )
+
+        // Floating header: the map remains visible behind every control.
+        Surface(
+            modifier = Modifier.align(Alignment.TopCenter).fillMaxWidth().statusBarsPadding().padding(horizontal = 14.dp, vertical = 8.dp),
+            shape = RoundedCornerShape(22.dp), color = Color.White.copy(alpha = 0.96f), shadowElevation = 8.dp
+        ) {
+            Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Navy)
+                Spacer(Modifier.width(12.dp))
+                Column(Modifier.weight(1f)) {
+                    Text("MYtrack", fontWeight = FontWeight.Bold, color = Navy, style = MaterialTheme.typography.titleLarge)
+                    Text("Berbagi lokasi bersama", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+                }
+                IconButton(onClick = { requestLocation() }) {
+                    Icon(Icons.Default.MyLocation, contentDescription = "Lokasi saya", tint = Blue)
                 }
             }
-            Card(
-                Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color.White),
-                elevation = CardDefaults.cardElevation(8.dp)
+        }
+
+        Surface(
+            modifier = Modifier.align(Alignment.TopStart).statusBarsPadding().padding(start = 18.dp, top = 82.dp),
+            shape = RoundedCornerShape(24.dp), color = Color.White, shadowElevation = 5.dp
+        ) {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.size(9.dp).background(if (sharing) Color(0xFF22A06B) else Color.Gray, CircleShape))
+                Spacer(Modifier.width(8.dp))
+                Text(if (sharing) "Berbagi aktif" else "Berbagi dijeda", color = Navy, style = MaterialTheme.typography.labelMedium)
+            }
+        }
+
+        Column(
+            modifier = Modifier.align(Alignment.CenterEnd).padding(end = 14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            SmallFloatingActionButton(onClick = { requestLocation() }, containerColor = Color.White, contentColor = Blue) {
+                Icon(Icons.Default.MyLocation, contentDescription = "Ke lokasi saya")
+            }
+            SmallFloatingActionButton(onClick = { selectedMenu = "Pencarian lokasi" }, containerColor = Color.White, contentColor = Blue) {
+                Icon(Icons.Default.Search, contentDescription = "Cari lokasi")
+            }
+        }
+
+        if (myLocation == null) {
+            Card(Modifier.align(Alignment.Center).padding(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
+                Text("Menunggu GPS mendapatkan lokasi…", Modifier.padding(16.dp), color = Navy)
+            }
+        }
+
+        // Compact two-column menu floats over the map instead of consuming map height.
+        Surface(
+            modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+                .navigationBarsPadding().padding(horizontal = 10.dp, vertical = 8.dp),
+            shape = RoundedCornerShape(topStart = 24.dp, topEnd = 24.dp, bottomStart = 20.dp, bottomEnd = 20.dp),
+            color = Color.White.copy(alpha = 0.97f), shadowElevation = 12.dp
+        ) {
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Box(Modifier.width(42.dp).height(5.dp).background(Color(0xFF9AA3B2), RoundedCornerShape(8.dp)).align(Alignment.CenterHorizontally))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MenuTile("Berbagi Lokasi", Icons.Default.LocationOn, Modifier.weight(1f)) { selectedMenu = "Berbagi Lokasi" }
+                    MenuTile("Pasangan", Icons.Default.People, Modifier.weight(1f)) { selectedMenu = "Pasangan" }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    MenuTile("Radar Kapal AIS", Icons.Default.DirectionsBoat, Modifier.weight(1f)) { selectedMenu = "Radar Kapal AIS" }
+                    MenuTile("Pengaturan", Icons.Default.Settings, Modifier.weight(1f)) { selectedMenu = "Pengaturan" }
+                }
+            }
+        }
+    }
+
+    if (selectedMenu != null) {
+        ModalBottomSheet(
+            onDismissRequest = { selectedMenu = null },
+            containerColor = Color.White,
+            dragHandle = { BottomSheetDefaults.DragHandle() }
+        ) {
+            Column(
+                Modifier.fillMaxWidth().navigationBarsPadding().padding(horizontal = 20.dp, vertical = 8.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Column(Modifier.padding(18.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Berbagi lokasi", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Navy)
-                            Text("Peta, lokasi pasangan, dan radar kapal", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                        }
-                        Icon(Icons.Default.Explore, contentDescription = null, tint = Blue)
-                    }
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
-                        Column(Modifier.weight(1f)) {
-                            Text("Radar kapal AIS", fontWeight = FontWeight.SemiBold, color = Navy)
-                            Text(radarStatus, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                        }
-                        Switch(checked = radarEnabled, onCheckedChange = {
-                            radarEnabled = it
-                            if (!it) { aisShips = emptyList(); radarStatus = "Radar kapal nonaktif" }
-                            else radarStatus = "Menghubungkan ke AISStream..."
-                        })
-                    }
-                    if (radarEnabled) {
-                        Text("Data kapal berasal dari siaran AIS yang tersedia; cakupan bergantung pada penerima AIS di sekitar.", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                        Text("Kapal terdeteksi (${aisShips.size})", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Navy)
-                        if (aisShips.isEmpty()) {
-                            Text("Belum ada data kapal yang diterima. Nama kapal akan muncul otomatis saat siaran AIS tersedia.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
-                        } else {
-                            aisShips.sortedBy { ship -> myLocation?.let { distanceKm(it.latitude, it.longitude, ship.latitude, ship.longitude) } ?: Double.MAX_VALUE }.forEach { ship ->
-                                Card(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    colors = CardDefaults.cardColors(containerColor = Pale),
-                                    shape = RoundedCornerShape(14.dp)
-                                ) {
-                                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                        Text(ship.name.ifBlank { "Nama belum disiarkan" }, fontWeight = FontWeight.SemiBold, color = Navy)
-                                        Text("MMSI ${ship.mmsi}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
-                                        val distance = myLocation?.let { distanceKm(it.latitude, it.longitude, ship.latitude, ship.longitude) }
-                                        Text(
-                                            "${distance?.let { String.format(java.util.Locale.US, "%.1f km", it) } ?: "Jarak —"} • ${String.format(java.util.Locale.US, "%.1f kn", ship.speedKnots)} • arah ${ship.course.toInt()}°",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = Color.DarkGray
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    OutlinedTextField(
-                        value = codeInput, onValueChange = { codeInput = it.uppercase().take(12) },
-                        modifier = Modifier.fillMaxWidth(), label = { Text("Kode pasangan (minimal 6 karakter)") },
-                        singleLine = true, leadingIcon = { Icon(Icons.Default.Group, contentDescription = null) }
-                    )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(
-                            modifier = Modifier.weight(1f),
-                            onClick = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(selectedMenu ?: "", modifier = Modifier.weight(1f), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Navy)
+                    IconButton(onClick = { selectedMenu = null }) { Icon(Icons.Default.Close, contentDescription = "Tutup") }
+                }
+
+                when (selectedMenu) {
+                    "Berbagi Lokasi" -> {
+                        Text("Masukkan kode yang sama pada perangkat pasangan.", color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                        OutlinedTextField(
+                            value = codeInput, onValueChange = { codeInput = it.uppercase().take(12) },
+                            modifier = Modifier.fillMaxWidth(), label = { Text("Kode pasangan (minimal 6 karakter)") },
+                            singleLine = true, leadingIcon = { Icon(Icons.Default.Group, contentDescription = null) }
+                        )
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(modifier = Modifier.weight(1f), onClick = {
                                 if (codeInput.trim().length >= 6) {
                                     pairCode = codeInput.trim().uppercase()
                                     prefs.edit().putString("pair_code", pairCode).apply()
                                     status = "Kode pasangan tersimpan"
                                 } else status = "Kode minimal 6 karakter"
-                            }
-                        ) { Text("Simpan kode") }
-                        Button(
-                            modifier = Modifier.weight(1f),
-                            onClick = {
+                            }) { Text("Simpan kode") }
+                            Button(modifier = Modifier.weight(1f), onClick = {
                                 if (!permissionGranted) permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
                                 else if (pairCode.length < 6) status = "Simpan kode pasangan terlebih dahulu"
                                 else { sharing = !sharing; status = if (sharing) "Mengaktifkan berbagi..." else "Berbagi lokasi dihentikan" }
+                            }) {
+                                Icon(if (sharing) Icons.Default.Pause else Icons.Default.ShareLocation, contentDescription = null)
+                                Spacer(Modifier.width(6.dp)); Text(if (sharing) "Hentikan" else "Mulai berbagi")
                             }
-                        ) {
-                            Icon(if (sharing) Icons.Default.Pause else Icons.Default.ShareLocation, contentDescription = null)
-                            Spacer(Modifier.width(6.dp)); Text(if (sharing) "Hentikan" else "Mulai berbagi")
+                        }
+                        if (!permissionGranted) {
+                            Button(modifier = Modifier.fillMaxWidth(), onClick = { permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) }) {
+                                Icon(Icons.Default.MyLocation, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("Aktifkan izin lokasi")
+                            }
+                        }
+                        Text(status, color = Blue, style = MaterialTheme.typography.bodySmall)
+                        Text(lastPartnerUpdate, color = Color.DarkGray, style = MaterialTheme.typography.bodyMedium)
+                        Text("Lokasi dibagikan saat tombol Mulai berbagi aktif dan aplikasi sedang terbuka.", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+                    }
+                    "Pasangan" -> {
+                        Text(if (partnerLocation == null) "Belum ada lokasi pasangan. Pastikan kedua perangkat memakai kode pasangan yang sama dan berbagi lokasi aktif." else lastPartnerUpdate, color = Color.Gray)
+                        partnerLocation?.let { Text("Koordinat: ${it.latitude}, ${it.longitude}", color = Navy) }
+                        Text("Kode tersimpan: ${if (pairCode.isBlank()) "Belum diatur" else pairCode}", color = Navy)
+                    }
+                    "Radar Kapal AIS" -> {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) {
+                                Text("Pantau kapal di sekitar", fontWeight = FontWeight.SemiBold, color = Navy)
+                                Text(radarStatus, color = Color.Gray, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Switch(checked = radarEnabled, onCheckedChange = {
+                                radarEnabled = it
+                                if (!it) { aisShips = emptyList(); radarStatus = "Radar kapal nonaktif" }
+                                else radarStatus = "Menghubungkan ke AISStream..."
+                            })
+                        }
+                        Text("Kapal terdeteksi: ${aisShips.size}", fontWeight = FontWeight.Bold, color = Navy)
+                        if (aisShips.isEmpty()) Text("Belum ada data kapal AIS yang diterima.", color = Color.Gray)
+                        else aisShips.forEach { ship ->
+                            ListItem(
+                                headlineContent = { Text(ship.name.ifBlank { "Nama kapal belum tersedia" }) },
+                                supportingContent = { Text("MMSI ${ship.mmsi} • ${String.format(Locale.US, "%.1f kn", ship.speedKnots)} • arah ${ship.course.toInt()}°") },
+                                leadingContent = { Icon(Icons.Default.DirectionsBoat, contentDescription = null, tint = Blue) }
+                            )
+                        }
+                        Text("Cakupan bergantung pada penerima AIS di sekitar dan layanan AIS yang tersedia.", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+                    }
+                    "Pencarian lokasi" -> {
+                        OutlinedTextField(value = searchQuery, onValueChange = { searchQuery = it }, modifier = Modifier.fillMaxWidth(), label = { Text("Cari nama tempat atau alamat") }, singleLine = true)
+                        Button(modifier = Modifier.fillMaxWidth(), onClick = {
+                            if (searchQuery.isBlank()) searchStatus = "Masukkan nama tempat terlebih dahulu"
+                            else scope.launch {
+                                searchStatus = "Mencari lokasi…"
+                                try {
+                                    val results = withContext(Dispatchers.IO) {
+                                        @Suppress("DEPRECATION")
+                                        Geocoder(context, Locale("id", "ID")).getFromLocationName(searchQuery, 1)
+                                    }
+                                    val found = results?.firstOrNull()
+                                    if (found != null) {
+                                        searchedPlace = LatLng(found.latitude, found.longitude)
+                                        searchStatus = "Lokasi ditemukan: ${found.getAddressLine(0) ?: searchQuery}"
+                                    } else searchStatus = "Lokasi tidak ditemukan"
+                                } catch (e: Exception) { searchStatus = "Pencarian gagal: ${e.localizedMessage}" }
+                            }
+                        }) { Icon(Icons.Default.Search, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("Cari") }
+                        Text(searchStatus, color = Blue, style = MaterialTheme.typography.bodySmall)
+                    }
+                    "Pengaturan" -> {
+                        Text("Izin lokasi: ${if (permissionGranted) "Aktif" else "Belum diberikan"}", color = Navy)
+                        Text("Nama lokasi: $myPlaceName", color = Color.Gray)
+                        OutlinedButton(onClick = { requestLocation() }, modifier = Modifier.fillMaxWidth()) {
+                            Icon(Icons.Default.MyLocation, contentDescription = null); Spacer(Modifier.width(8.dp)); Text("Perbarui lokasi sekarang")
                         }
                     }
-                    if (!permissionGranted) {
-                        Button(modifier = Modifier.fillMaxWidth(), onClick = { permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION)) }) {
-                            Icon(Icons.Default.MyLocation, contentDescription = null)
-                            Spacer(Modifier.width(8.dp))
-                            Text("Aktifkan izin lokasi")
-                        }
-                    }
-                    Text(status, style = MaterialTheme.typography.bodySmall, color = Blue)
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(Icons.Default.Favorite, contentDescription = null, tint = Color(0xFFE45D78), modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text(lastPartnerUpdate, style = MaterialTheme.typography.bodySmall, color = Color.DarkGray)
-                    }
-                    Text("Lokasi hanya dibagikan saat tombol Mulai berbagi aktif dan aplikasi sedang terbuka.", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
                 }
+                Spacer(Modifier.height(12.dp))
             }
         }
     }
 }
 
+@Composable
+private fun MenuTile(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    Surface(
+        modifier = modifier.height(76.dp),
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFFF7FAFF),
+        border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFE2EAF5)),
+        onClick = onClick
+    ) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+            Icon(icon, contentDescription = null, tint = Blue, modifier = Modifier.size(25.dp))
+            Spacer(Modifier.height(4.dp))
+            Text(label, color = Navy, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold)
+        }
+    }
+}
