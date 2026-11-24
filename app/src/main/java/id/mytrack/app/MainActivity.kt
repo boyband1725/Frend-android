@@ -56,6 +56,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
 import java.util.Locale
+import java.util.concurrent.TimeUnit
 
 private val Navy = Color(0xFF123B70)
 private val Blue = Color(0xFF2878E5)
@@ -168,7 +169,7 @@ private fun MytrackScreen() {
     var aisShips by remember { mutableStateOf<List<AisShip>>(emptyList()) }
     var radarStatus by remember { mutableStateOf("Radar kapal nonaktif") }
     var aisAccessToken by remember { mutableStateOf<String?>(null) }
-    val client = remember { OkHttpClient() }
+    val client = remember {\n        OkHttpClient.Builder()\n            .connectTimeout(15, TimeUnit.SECONDS)\n            .readTimeout(60, TimeUnit.SECONDS)\n            .writeTimeout(15, TimeUnit.SECONDS)\n            .callTimeout(65, TimeUnit.SECONDS)\n            .build()\n    }
     LaunchedEffect(Unit) { Configuration.getInstance().userAgentValue = context.packageName }
 
     fun requestLocation() {
@@ -340,7 +341,7 @@ private fun MytrackScreen() {
                         else -> message.ifBlank { "Paket posisi diterima, menunggu koordinat kapal" }
                     }
                 } catch (e: Exception) {
-                    radarStatus = "Radar gagal: ${e.localizedMessage ?: "periksa koneksi dan konfigurasi"}"
+                    val cause = e.localizedMessage ?: "periksa koneksi dan konfigurasi"\n                    radarStatus = if (e is java.net.SocketTimeoutException) {\n                        "Waktu tunggu AIS habis. Periksa koneksi server dan AISStream."\n                    } else "Radar gagal: $cause"
                 }
             } else {
                 radarStatus = "Konfigurasi Supabase belum benar"
