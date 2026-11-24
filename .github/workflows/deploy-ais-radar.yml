@@ -23,4 +23,4 @@ jobs:
           test -n "$SUPABASE_PROJECT_REF"
           test -n "$AISSTREAM_API_KEY"
           supabase secrets set AISSTREAM_API_KEY="$AISSTREAM_API_KEY" --project-ref "$SUPABASE_PROJECT_REF" --yes
-          supabase functions deploy ais-radar --project-ref "$SUPABASE_PROJECT_REF"
+          supabase functions deploy ais-radar --project-ref "$SUPABASE_PROJECT_REF" --yes
