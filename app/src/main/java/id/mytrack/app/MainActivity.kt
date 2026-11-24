@@ -47,6 +47,15 @@ private val Navy = Color(0xFF123B70)
 private val Blue = Color(0xFF2878E5)
 private val Pale = Color(0xFFF3F7FC)
 
+private data class AisShip(
+    val mmsi: Long,
+    val name: String,
+    val latitude: Double,
+    val longitude: Double,
+    val speedKnots: Double,
+    val course: Double
+)
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -72,6 +81,9 @@ private fun MytrackScreen() {
         ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
     ) }
     var lastPartnerUpdate by remember { mutableStateOf("Belum ada lokasi pasangan") }
+    var radarEnabled by remember { mutableStateOf(false) }
+    var aisShips by remember { mutableStateOf<List<AisShip>>(emptyList()) }
+    var radarStatus by remember { mutableStateOf("Radar kapal nonaktif") }
     val client = remember { OkHttpClient() }
     val camera = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(LatLng(-6.2, 106.816666), 12f)
@@ -100,6 +112,53 @@ private fun MytrackScreen() {
     LaunchedEffect(permissionGranted) { if (permissionGranted) requestLocation() }
     LaunchedEffect(Unit) {
         if (!permissionGranted) permissionLauncher.launch(arrayOf(Manifest.permission.ACCESS_FINE_LOCATION, Manifest.permission.ACCESS_COARSE_LOCATION))
+    }
+
+    LaunchedEffect(radarEnabled, myLocation) {
+        while (radarEnabled) {
+            val point = myLocation
+            if (point == null) {
+                radarStatus = "Menunggu lokasi GPS untuk radar"
+                requestLocation()
+            } else if (BuildConfig.SUPABASE_URL.startsWith("https://") &&
+                !BuildConfig.SUPABASE_URL.contains("YOUR_PROJECT") &&
+                !BuildConfig.SUPABASE_ANON_KEY.startsWith("YOUR_")) {
+                try {
+                    val radarRequest = Request.Builder()
+                        .url("${BuildConfig.SUPABASE_URL}/functions/v1/ais-radar?lat=${point.latitude}&lon=${point.longitude}&radius=20")
+                        .addHeader("apikey", BuildConfig.SUPABASE_ANON_KEY)
+                        .addHeader("Authorization", "Bearer ${BuildConfig.SUPABASE_ANON_KEY}")
+                        .get().build()
+                    val radarResult = withContext(Dispatchers.IO) {
+                        client.newCall(radarRequest).execute().use { response ->
+                            val body = response.body?.string().orEmpty()
+                            if (!response.isSuccessful) throw IllegalStateException("HTTP ${response.code}: $body")
+                            JSONObject(body)
+                        }
+                    }
+                    val array = radarResult.optJSONArray("ships") ?: JSONArray()
+                    aisShips = (0 until array.length()).mapNotNull { index ->
+                        val item = array.optJSONObject(index) ?: return@mapNotNull null
+                        val lat = item.optDouble("latitude", Double.NaN)
+                        val lon = item.optDouble("longitude", Double.NaN)
+                        if (!lat.isFinite() || !lon.isFinite()) null else AisShip(
+                            mmsi = item.optLong("mmsi"),
+                            name = item.optString("name", "Kapal tidak dikenal").trim(),
+                            latitude = lat,
+                            longitude = lon,
+                            speedKnots = item.optDouble("speedKnots", 0.0),
+                            course = item.optDouble("course", 0.0)
+                        )
+                    }
+                    radarStatus = if (aisShips.isEmpty()) "Belum ada kapal AIS dalam radius 20 km" else "${aisShips.size} kapal terdeteksi dalam radius 20 km"
+                } catch (e: Exception) {
+                    radarStatus = "Radar gagal: ${e.localizedMessage ?: "periksa konfigurasi"}"
+                }
+            } else {
+                radarStatus = "Isi URL Supabase dan anon key di konfigurasi aplikasi"
+            }
+            delay(30000)
+        }
     }
 
     LaunchedEffect(sharing, pairCode, myLocation) {
@@ -162,6 +221,13 @@ private fun MytrackScreen() {
                 ) {
                     myLocation?.let { Marker(state = MarkerState(position = it), title = "Lokasi saya", snippet = "Perangkat ini") }
                     partnerLocation?.let { Marker(state = MarkerState(position = it), title = "Pasangan", snippet = lastPartnerUpdate) }
+                    aisShips.forEach { ship ->
+                        Marker(
+                            state = MarkerState(position = LatLng(ship.latitude, ship.longitude)),
+                            title = ship.name.ifBlank { "Kapal ${ship.mmsi}" },
+                            snippet = "MMSI ${ship.mmsi} • ${ship.speedKnots} kn • arah ${ship.course}°"
+                        )
+                    }
                 }
                 if (myLocation == null) {
                     Card(Modifier.align(Alignment.Center).padding(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
@@ -184,6 +250,20 @@ private fun MytrackScreen() {
             ) {
                 Column(Modifier.padding(18.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text("Berbagi lokasi", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = Navy)
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+                        Column(Modifier.weight(1f)) {
+                            Text("Radar kapal AIS", fontWeight = FontWeight.SemiBold, color = Navy)
+                            Text(radarStatus, style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                        }
+                        Switch(checked = radarEnabled, onCheckedChange = {
+                            radarEnabled = it
+                            if (!it) { aisShips = emptyList(); radarStatus = "Radar kapal nonaktif" }
+                            else radarStatus = "Menghubungkan ke AISStream..."
+                        })
+                    }
+                    if (radarEnabled) {
+                        Text("Data kapal berasal dari siaran AIS yang tersedia; cakupan bergantung pada penerima AIS di sekitar.", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                    }
                     OutlinedTextField(
                         value = codeInput, onValueChange = { codeInput = it.uppercase().take(12) },
                         modifier = Modifier.fillMaxWidth(), label = { Text("Kode pasangan (minimal 6 karakter)") },
