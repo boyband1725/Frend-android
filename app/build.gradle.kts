@@ -9,14 +9,18 @@ android {
     val mapsApiKey = providers.gradleProperty("MAPS_API_KEY")
         .orElse(providers.environmentVariable("MAPS_API_KEY"))
         .orElse("REPLACE_WITH_GOOGLE_MAPS_API_KEY").get()
+    val buildVersionCode = providers.environmentVariable("MYTRACK_VERSION_CODE")
+        .orElse("3").get().toInt()
+    val buildVersionName = providers.environmentVariable("MYTRACK_VERSION_NAME")
+        .orElse("1.0.2").get()
     compileSdk = 35
 
     defaultConfig {
         applicationId = "id.mytrack.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 3
-        versionName = "1.0.2"
+        versionCode = buildVersionCode
+        versionName = buildVersionName
         manifestPlaceholders["MAPS_API_KEY"] = mapsApiKey
         buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
         buildConfigField("String", "SUPABASE_URL", "\"https://tyhulcbdqrvnpkillrij.supabase.co\"")
