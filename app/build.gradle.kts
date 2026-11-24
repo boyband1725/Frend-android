@@ -13,7 +13,25 @@ android {
         .orElse("3").get().toInt()
     val buildVersionName = providers.environmentVariable("MYTRACK_VERSION_NAME")
         .orElse("1.0.2").get()
+    val signingStoreFile = providers.environmentVariable("MYTRACK_KEYSTORE_FILE").orNull
+    val signingStorePassword = providers.environmentVariable("MYTRACK_KEYSTORE_PASSWORD").orNull
+    val signingKeyAlias = providers.environmentVariable("MYTRACK_KEY_ALIAS").orNull
+    val signingKeyPassword = providers.environmentVariable("MYTRACK_KEY_PASSWORD").orNull
+    val hasReleaseSigning = signingStoreFile != null && signingStorePassword != null &&
+        signingKeyAlias != null && signingKeyPassword != null
+
     compileSdk = 35
+
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("stableRelease") {
+                storeFile = file(signingStoreFile!!)
+                storePassword = signingStorePassword
+                keyAlias = signingKeyAlias
+                keyPassword = signingKeyPassword
+            }
+        }
+    }
 
     defaultConfig {
         applicationId = "id.mytrack.app"
@@ -25,6 +43,19 @@ android {
         buildConfigField("String", "MAPS_API_KEY", "\"$mapsApiKey\"")
         buildConfigField("String", "SUPABASE_URL", "\"https://tyhulcbdqrvnpkillrij.supabase.co\"")
         buildConfigField("String", "SUPABASE_ANON_KEY", "\"sb_publishable_exImSNccvxIoi_kO3TxxcQ_itatkoa_\"")
+    }
+
+    buildTypes {
+        debug {
+            if (hasReleaseSigning) signingConfig = signingConfigs.getByName("stableRelease")
+        }
+        release {
+            if (!hasReleaseSigning) {
+                throw GradleException("MYtrack stable signing secrets are required for release builds.")
+            }
+            signingConfig = signingConfigs.getByName("stableRelease")
+            isMinifyEnabled = false
+        }
     }
 
     buildFeatures { compose = true; buildConfig = true }
