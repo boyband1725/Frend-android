@@ -56,6 +56,16 @@ private data class AisShip(
     val course: Double
 )
 
+private fun distanceKm(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+    val earthRadiusKm = 6371.0
+    val dLat = Math.toRadians(lat2 - lat1)
+    val dLon = Math.toRadians(lon2 - lon1)
+    val a = kotlin.math.sin(dLat / 2) * kotlin.math.sin(dLat / 2) +
+        kotlin.math.cos(Math.toRadians(lat1)) * kotlin.math.cos(Math.toRadians(lat2)) *
+        kotlin.math.sin(dLon / 2) * kotlin.math.sin(dLon / 2)
+    return earthRadiusKm * 2 * kotlin.math.atan2(kotlin.math.sqrt(a), kotlin.math.sqrt(1 - a))
+}
+
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -263,6 +273,29 @@ private fun MytrackScreen() {
                     }
                     if (radarEnabled) {
                         Text("Data kapal berasal dari siaran AIS yang tersedia; cakupan bergantung pada penerima AIS di sekitar.", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                        Text("Kapal terdeteksi (${aisShips.size})", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = Navy)
+                        if (aisShips.isEmpty()) {
+                            Text("Belum ada data kapal yang diterima. Nama kapal akan muncul otomatis saat siaran AIS tersedia.", style = MaterialTheme.typography.bodySmall, color = Color.Gray)
+                        } else {
+                            aisShips.sortedBy { ship -> myLocation?.let { distanceKm(it.latitude, it.longitude, ship.latitude, ship.longitude) } ?: Double.MAX_VALUE }.forEach { ship ->
+                                Card(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    colors = CardDefaults.cardColors(containerColor = Pale),
+                                    shape = RoundedCornerShape(14.dp)
+                                ) {
+                                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        Text(ship.name.ifBlank { "Nama belum disiarkan" }, fontWeight = FontWeight.SemiBold, color = Navy)
+                                        Text("MMSI ${ship.mmsi}", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                        val distance = myLocation?.let { distanceKm(it.latitude, it.longitude, ship.latitude, ship.longitude) }
+                                        Text(
+                                            "${distance?.let { String.format(java.util.Locale.US, "%.1f km", it) } ?: "Jarak —"} • ${String.format(java.util.Locale.US, "%.1f kn", ship.speedKnots)} • arah ${ship.course.toInt()}°",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = Color.DarkGray
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     }
                     OutlinedTextField(
                         value = codeInput, onValueChange = { codeInput = it.uppercase().take(12) },
