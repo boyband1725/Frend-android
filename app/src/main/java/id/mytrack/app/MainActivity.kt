@@ -99,6 +99,7 @@ private fun MytrackScreen() {
     var routeDestinationName by remember { mutableStateOf("") }
     var navigationActive by remember { mutableStateOf(false) }
     var routeLoading by remember { mutableStateOf(false) }
+    var selectedMenu by remember { mutableStateOf<String?>(null) }
     var partnerLocation by remember { mutableStateOf<LatLng?>(null) }
     var pairCode by remember { mutableStateOf(prefs.getString("pair_code", "") ?: "") }
     var codeInput by remember { mutableStateOf(pairCode) }
@@ -291,8 +292,6 @@ private fun MytrackScreen() {
             if (permissionGranted) requestLocation()
         }
     }
-
-    var selectedMenu by remember { mutableStateOf<String?>(null) }
 
     Box(Modifier.fillMaxSize().background(Pale)) {
         AndroidView(
