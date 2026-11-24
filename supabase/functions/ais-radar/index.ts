@@ -1,3 +1,6 @@
+import WebSocket from "npm:ws@8.18.0";
+import { Buffer } from "node:buffer";
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -12,6 +15,8 @@ type Ship = {
   speedKnots: number;
   course: number;
   heading: number;
+  shipType: number;
+  imo: number;
   receivedAt: string;
 };
 
@@ -25,7 +30,7 @@ Deno.serve(async (req) => {
   const url = new URL(req.url);
   const lat = Number(url.searchParams.get("lat"));
   const lon = Number(url.searchParams.get("lon"));
-  const radiusKm = Math.min(100, Math.max(5, Number(url.searchParams.get("radius") || 50)));
+  const radiusKm = Math.min(100, Math.max(5, Number(url.searchParams.get("radius") || 20)));
   if (!Number.isFinite(lat) || !Number.isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) {
     return json({ error: "Koordinat GPS tidak valid" }, 400);
   }
@@ -39,6 +44,7 @@ Deno.serve(async (req) => {
 
   const ships = new Map<number, Ship>();
   const names = new Map<number, string>();
+  const staticDataByMmsi = new Map<number, { shipType: number; imo: number }>();
   const messageCounts: Record<string, number> = {};
   let socket: WebSocket | null = null;
   let subscriptionConfirmed = false;
@@ -57,12 +63,16 @@ Deno.serve(async (req) => {
         resolve({ ships: [...ships.values()], ...(streamError ? { streamError } : {}) });
       };
 
-      // A 20-second sample was too short for an event-driven feed at some ports.
-      const timer = setTimeout(() => finish(), 30000);
+      // Collect a useful live sample while keeping the HTTP request short-lived.
+      const timer = setTimeout(() => finish(), 45000);
       try {
-        socket = new WebSocket("wss://stream.aisstream.io/v0/stream");
-        socket.binaryType = "arraybuffer";
-        socket.onopen = () => {
+        // AISStream requires permessage-deflate for full message bandwidth.
+        socket = new WebSocket("wss://stream.aisstream.io/v0/stream", {
+          perMessageDeflate: true,
+          handshakeTimeout: 12000,
+        });
+
+        socket.on("open", () => {
           socket?.send(JSON.stringify({
             APIKey: apiKey,
             BoundingBoxes: bounds,
@@ -74,14 +84,19 @@ Deno.serve(async (req) => {
               "StaticDataReport",
             ],
           }));
-        };
-        socket.onmessage = async (event) => {
+        });
+
+        socket.on("message", (data: unknown) => {
           try {
-            let raw: string;
-            if (typeof event.data === "string") raw = event.data;
-            else if (event.data instanceof ArrayBuffer) raw = new TextDecoder().decode(event.data);
-            else if (event.data instanceof Blob) raw = await event.data.text();
-            else return;
+            const raw = typeof data === "string"
+              ? data
+              : Buffer.isBuffer(data)
+                ? data.toString("utf8")
+                : Array.isArray(data)
+                  ? Buffer.concat(data).toString("utf8")
+                  : data instanceof ArrayBuffer
+                    ? new TextDecoder().decode(data)
+                    : String(data);
             const packet = JSON.parse(raw);
             const messageType = String(packet.MessageType || "Unknown");
             messageCounts[messageType] = (messageCounts[messageType] || 0) + 1;
@@ -105,11 +120,17 @@ Deno.serve(async (req) => {
             if (!Number.isFinite(mmsi)) return;
 
             if (messageType === "ShipStaticData" || messageType === "StaticDataReport") {
-              const name = String(payload.Name || meta.ShipName || "").replace(/@/g, "").trim();
-              if (name) {
-                names.set(mmsi, name);
-                const existing = ships.get(mmsi);
-                if (existing) existing.name = name;
+              const staticData = message.ShipStaticData || message.StaticDataReport || {};
+              const name = String(staticData.Name || meta.ShipName || "").replace(/@/g, "").trim();
+              const shipType = Number(staticData.Type ?? 0);
+              const imo = Number(staticData.ImoNumber ?? staticData.IMO ?? 0);
+              staticDataByMmsi.set(mmsi, { shipType, imo });
+              if (name) names.set(mmsi, name);
+              const existing = ships.get(mmsi);
+              if (existing) {
+                if (name) existing.name = name;
+                existing.shipType = shipType;
+                existing.imo = imo;
               }
               return;
             }
@@ -119,7 +140,9 @@ Deno.serve(async (req) => {
             const shipLon = Number(meta.Longitude ?? payload.Longitude);
             if (!Number.isFinite(shipLat) || !Number.isFinite(shipLon) ||
                 Math.abs(shipLat) > 90 || Math.abs(shipLon) > 180) return;
+
             const previous = ships.get(mmsi);
+            const staticInfo = staticDataByMmsi.get(mmsi);
             ships.set(mmsi, {
               mmsi,
               name: names.get(mmsi) || String(meta.ShipName || previous?.name || "Nama kapal belum diterima").replace(/@/g, "").trim(),
@@ -127,19 +150,24 @@ Deno.serve(async (req) => {
               longitude: shipLon,
               speedKnots: Number(payload.Sog ?? 0),
               course: Number(payload.Cog ?? payload.TrueHeading ?? 0),
-              heading: Number(payload.TrueHeading ?? 0),
+              heading: Number(payload.TrueHeading ?? payload.Cog ?? 0),
+              shipType: staticInfo?.shipType ?? previous?.shipType ?? 0,
+              imo: staticInfo?.imo ?? previous?.imo ?? 0,
               receivedAt: new Date().toISOString(),
             });
-          } catch (_) { /* Ignore malformed AIS messages. */ }
-        };
-        socket.onerror = () => finish("Koneksi AISStream gagal atau ditolak");
-        socket.onclose = (event) => {
-          closeCode = event.code;
-          closeReason = event.reason || "";
+          } catch (_) {
+            // Ignore malformed packets but continue consuming the stream.
+          }
+        });
+
+        socket.on("error", (error: Error) => finish(error.message || "Koneksi AISStream gagal"));
+        socket.on("close", (code: number, reason: Buffer) => {
+          closeCode = code;
+          closeReason = reason?.toString("utf8") || "";
           finish();
-        };
-      } catch (_) {
-        finish("Tidak dapat membuka koneksi AISStream");
+        });
+      } catch (error) {
+        finish(error instanceof Error ? error.message : "Tidak dapat membuka koneksi AISStream");
       }
     });
 
@@ -147,16 +175,16 @@ Deno.serve(async (req) => {
     const message = shipList.length
       ? null
       : !subscriptionConfirmed
-        ? "AISStream belum mengonfirmasi langganan. Periksa API key AISSTREAM_API_KEY dan status koneksi."
-        : compressionEnabled === false
-          ? "Langganan diterima tetapi kompresi permessage-deflate tidak aktif; koneksi mungkin tidak menerima aliran data penuh."
-          : "Langganan AISStream diterima, tetapi tidak ada laporan posisi kapal dalam 30 detik. Ini menunjukkan keterbatasan cakupan/penerimaan data AIS di area ini, bukan masalah tampilan peta.";
+        ? "AISStream belum mengonfirmasi langganan. Periksa API key AISSTREAM_API_KEY."
+        : compressionEnabled !== true
+          ? "AISStream menerima koneksi tetapi kompresi permessage-deflate tidak aktif."
+          : "Langganan dan kompresi AISStream aktif, tetapi belum ada laporan posisi kapal pada jendela pemantauan ini. Periksa cakupan penerima AIS di area tersebut.";
 
     return json({
       ships: shipList,
       count: shipList.length,
       radiusKm,
-      listeningSeconds: 30,
+      listeningSeconds: 45,
       subscriptionConfirmed,
       compressionEnabled,
       messageCounts,
@@ -165,9 +193,8 @@ Deno.serve(async (req) => {
       streamError: result.streamError || null,
       message,
     });
-
-  } catch (_) {
-    return json({ error: "Gagal mengambil data AIS" }, 502);
+  } catch (error) {
+    return json({ error: error instanceof Error ? error.message : "Gagal mengambil data AIS" }, 502);
   }
 });
 
