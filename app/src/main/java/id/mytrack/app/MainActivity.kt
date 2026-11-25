@@ -73,6 +73,38 @@ private data class AisShip(
     val imo: Long
 )
 
+private data class WeatherSnapshot(
+    val temperature: Double,
+    val humidity: Int,
+    val windSpeed: Double,
+    val windDirection: Int,
+    val precipitation: Double,
+    val weatherCode: Int,
+    val observedAt: String
+)
+
+private fun weatherDescription(code: Int): String = when (code) {
+    0 -> "Cerah"
+    1 -> "Cerah berawan"
+    2 -> "Berawan sebagian"
+    3 -> "Berawan"
+    45, 48 -> "Berkabut"
+    51, 53, 55 -> "Gerimis"
+    56, 57 -> "Gerimis beku"
+    61, 63, 65 -> "Hujan"
+    66, 67 -> "Hujan beku"
+    71, 73, 75, 77 -> "Salju"
+    80, 81, 82 -> "Hujan lokal"
+    85, 86 -> "Hujan salju"
+    95, 96, 99 -> "Badai petir"
+    else -> "Cuaca tidak diketahui"
+}
+
+private fun windDirectionLabel(degrees: Int): String {
+    val directions = listOf("U", "TL", "T", "TG", "S", "BD", "B", "BL")
+    return directions[((degrees + 22) / 45) % 8]
+}
+
 private fun shipTypeLabel(type: Int): String = when (type) {
     in 60..69 -> "Kapal penumpang"
     in 70..79 -> "Kapal kargo"
@@ -167,6 +199,9 @@ private fun MytrackScreen() {
     var lastPartnerUpdate by remember { mutableStateOf("Belum ada lokasi pasangan") }
     var radarEnabled by remember { mutableStateOf(false) }
     var aisShips by remember { mutableStateOf<List<AisShip>>(emptyList()) }
+    var weather by remember { mutableStateOf<WeatherSnapshot?>(null) }
+    var weatherStatus by remember { mutableStateOf("Menunggu lokasi GPS…") }
+    var shipSearchQuery by remember { mutableStateOf("") }
     var radarStatus by remember { mutableStateOf("Radar kapal nonaktif") }
     var aisAccessToken by remember { mutableStateOf<String?>(null) }
     val client = remember {
@@ -364,6 +399,40 @@ private fun MytrackScreen() {
     }
 
     LaunchedEffect(sharing, pairCode, myLocation) {
+    LaunchedEffect(myLocation) {
+        while (true) {
+            val point = myLocation
+            if (point != null) {
+                try {
+                    val url = "https://api.open-meteo.com/v1/forecast?latitude=${point.latitude}&longitude=${point.longitude}&current=temperature_2m,relative_humidity_2m,precipitation,weather_code,wind_speed_10m,wind_direction_10m&timezone=auto"
+                    val result = withContext(Dispatchers.IO) {
+                        val request = Request.Builder().url(url).header("User-Agent", "MYtrack-Android").get().build()
+                        client.newCall(request).execute().use { response ->
+                            val body = response.body?.string().orEmpty()
+                            if (!response.isSuccessful) throw IllegalStateException("Cuaca HTTP ${response.code}")
+                            JSONObject(body).getJSONObject("current")
+                        }
+                    }
+                    weather = WeatherSnapshot(
+                        temperature = result.optDouble("temperature_2m", Double.NaN),
+                        humidity = result.optInt("relative_humidity_2m", 0),
+                        windSpeed = result.optDouble("wind_speed_10m", 0.0),
+                        windDirection = result.optInt("wind_direction_10m", 0),
+                        precipitation = result.optDouble("precipitation", 0.0),
+                        weatherCode = result.optInt("weather_code", -1),
+                        observedAt = result.optString("time", "")
+                    )
+                    weatherStatus = "Diperbarui otomatis"
+                } catch (e: Exception) {
+                    weatherStatus = "Data cuaca belum tersedia: ${e.localizedMessage ?: "periksa internet"}"
+                }
+            } else {
+                weatherStatus = "Menunggu lokasi GPS…"
+            }
+            delay(600000)
+        }
+    }
+
         while (sharing && pairCode.length >= 6) {
             val point = myLocation
             if (point != null && BuildConfig.SUPABASE_URL.startsWith("https://") && !BuildConfig.SUPABASE_URL.contains("YOUR_PROJECT")) {
@@ -440,7 +509,7 @@ private fun MytrackScreen() {
                 myLocation?.let { addPin(it, "Lokasi saya", myPlaceName) }
                 searchedPlace?.let { addPin(it, searchQuery.ifBlank { "Tempat dicari" }, "Hasil pencarian") }
                 partnerLocation?.let { addPin(it, "Pasangan", lastPartnerUpdate) }
-                aisShips.forEach { ship ->
+                aisShips.filter { shipSearchQuery.isBlank() || it.name.contains(shipSearchQuery, true) || it.mmsi.toString().contains(shipSearchQuery) }.forEach { ship ->
                     val marker = OsmMarker(map).apply {
                         position = GeoPoint(ship.latitude, ship.longitude)
                         title = ship.name.ifBlank { "Kapal ${ship.mmsi}" }
@@ -499,8 +568,16 @@ private fun MytrackScreen() {
                 IconButton(onClick = { menuExpanded = true }) { Icon(Icons.Default.Menu, contentDescription = "Menu", tint = Navy) }
                 Spacer(Modifier.width(12.dp))
                 Column(Modifier.weight(1f)) {
-                    Text("MYtrack", fontWeight = FontWeight.Bold, color = Navy, style = MaterialTheme.typography.titleLarge)
-                    Text("Berbagi lokasi bersama", color = Color.Gray, style = MaterialTheme.typography.labelSmall)
+                    Text("MYtrack • Radar Laut", fontWeight = FontWeight.Bold, color = Navy, style = MaterialTheme.typography.titleMedium)
+                    OutlinedTextField(
+                        value = shipSearchQuery,
+                        onValueChange = { shipSearchQuery = it },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                        placeholder = { Text("Cari nama kapal / MMSI") },
+                        singleLine = true,
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) }
+                    )
                 }
                 IconButton(onClick = { requestLocation() }) {
                     Icon(Icons.Default.MyLocation, contentDescription = "Lokasi saya", tint = Blue)
@@ -534,6 +611,38 @@ private fun MytrackScreen() {
         if (myLocation == null) {
             Card(Modifier.align(Alignment.Center).padding(20.dp), colors = CardDefaults.cardColors(containerColor = Color.White)) {
                 Text("Menunggu GPS mendapatkan lokasi…", Modifier.padding(16.dp), color = Navy)
+            }
+        }
+
+        Surface(
+            modifier = Modifier.align(Alignment.BottomStart).padding(start = 14.dp, bottom = 194.dp).widthIn(max = 310.dp),
+            shape = RoundedCornerShape(20.dp),
+            color = Color(0xDD17212B),
+            shadowElevation = 8.dp
+        ) {
+            Column(Modifier.padding(horizontal = 14.dp, vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.WbSunny, contentDescription = null, tint = Color(0xFFFFD166))
+                    Spacer(Modifier.width(7.dp))
+                    Text("CUACA • LOKASI SAYA", color = Color.White, style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                    Spacer(Modifier.weight(1f))
+                    Text("LIVE", color = Color(0xFF8DE0B0), style = MaterialTheme.typography.labelSmall)
+                }
+                if (weather != null) {
+                    val w = weather!!
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(String.format(Locale("id", "ID"), "%.1f°", w.temperature), color = Color.White, style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                        Spacer(Modifier.width(8.dp))
+                        Column {
+                            Text(weatherDescription(w.weatherCode), color = Color.White, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                            Text("Kelembapan ${w.humidity}%", color = Color.LightGray, style = MaterialTheme.typography.labelSmall)
+                        }
+                    }
+                    Text("Angin ${String.format(Locale.US, "%.1f", w.windSpeed)} km/j • ${windDirectionLabel(w.windDirection)} (${w.windDirection}°)", color = Color.White, style = MaterialTheme.typography.bodySmall)
+                    Text("Hujan ${String.format(Locale.US, "%.1f", w.precipitation)} mm • ${weatherStatus}", color = Color.LightGray, style = MaterialTheme.typography.labelSmall)
+                } else {
+                    Text(weatherStatus, color = Color.White, style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
 
