@@ -398,7 +398,6 @@ private fun MytrackScreen() {
         }
     }
 
-    LaunchedEffect(sharing, pairCode, myLocation) {
     LaunchedEffect(myLocation) {
         while (true) {
             val point = myLocation
@@ -433,6 +432,7 @@ private fun MytrackScreen() {
         }
     }
 
+    LaunchedEffect(sharing, pairCode, myLocation) {
         while (sharing && pairCode.length >= 6) {
             val point = myLocation
             if (point != null && BuildConfig.SUPABASE_URL.startsWith("https://") && !BuildConfig.SUPABASE_URL.contains("YOUR_PROJECT")) {
